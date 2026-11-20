@@ -7,7 +7,13 @@ View the [use cases](docs/use-cases.md) and try IsoVista [here](http://43.129.19
 
 ## Architecture
 
-![arch](images/arch.png)
+![arch](docs/images/arch.png)
+
+## Development Guide
+
+- [ROADMAP.md](ROADMAP.md): verified codebase map, development workflow, current limitations, and thesis milestones.
+- [AGENTS.md](AGENTS.md): short routing and safety rules for coding agents.
+- [docs/plans/README.md](docs/plans/README.md): detailed target-state design proposals. These are plans, not implemented features.
 
 ## Key Features
 

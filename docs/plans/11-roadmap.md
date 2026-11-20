@@ -109,7 +109,7 @@ P0.6 profile 规范 ──▶ 全部性能验收
 | `backend/main.py` | 演进为 Orchestrator + Visualization 服务 | P0–P2 |
 | `frontend/` | 实验视图、SQL 视图、时间线、报告页 | P1–P2 |
 | `config.properties` / `workload.variable` | 实验 YAML 编译/泛化 | P0–P1 |
-| `resource/`（elle-cli、Viper submodule） | 子进程 checker 资产；新增 Cobra 等 | P1–P2 |
+| `third_party/`（elle-cli、Viper submodule） | 子进程 checker 资产；新增 Cobra 等 | P1–P2 |
 | `docs/how-to-*` | 扩充为平台扩展指南（benchmark/executor/checker/reducer） | P0–P3 |
 
 ## 10. 结语

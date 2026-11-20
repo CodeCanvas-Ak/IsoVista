@@ -1,0 +1,31 @@
+# Git and agent-local state
+.git
+.github
+.workbuddy
+.idea
+.vscode
+
+# Build outputs
+target
+frontend/node_modules
+frontend/dist
+
+# Runtime outputs
+current
+result
+*.log
+
+# Python caches and virtual environments
+__pycache__
+*.py[cod]
+.venv
+venv
+.pytest_cache
+
+# Documentation and examples are not runtime inputs
+docs
+examples
+
+# OS files
+.DS_Store
+Thumbs.db

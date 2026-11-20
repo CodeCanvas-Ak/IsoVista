@@ -106,7 +106,7 @@ BackEnd:  IR ─▶ ConstraintGen（SMT 编码 / 图构造）
 | `checker/{C4,PolySI,VeriStrong_SI,VeriStrong_SER,Viper,elle}` | 逐步迁移为插件；C4 内部按 Boomslang 分层拆分前端/后端 |
 | `util/ConfigParser` 的 checker 映射表 | 升级为插件注册表（NAME → 能力声明） |
 | `util/Profiler` | 阶段结构化 + 机器画像记录 |
-| `resource/elle-cli*.jar`、`resource/Viper`（submodule） | 保留为子进程 checker 资产；新增 Cobra/Leopard 等子进程资产 |
+| `third_party/elle-cli*.jar`、`third_party/Viper`（submodule） | 保留为子进程 checker 资产；新增 Cobra/Leopard 等子进程资产 |
 
 ## 8. 验收要点
 

@@ -1,6 +1,7 @@
 # IsoVista 统一黑盒隔离测试平台 — 开发与扩展计划
 
 > 状态：**规划中（仅方案，不实现）** · 生成日期：2026-10-25
+> 使用约定：当前代码事实、已验证命令与近期执行任务以根目录 [ROADMAP.md](../../ROADMAP.md) 为准；本目录只描述目标态方案。
 > 依据：IsoVista 现有代码库通读 + `refs/` 27 篇权威文献调研（VLDB/OSDI/EuroSys/SIGMOD/ICDE/ISSTA/CAV/PLDI/CIDR/TOCS 2020–2026）
 
 ## 1. 目标定位（一句话）

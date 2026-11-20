@@ -27,7 +27,7 @@ import static util.Profiler.updateMemory;
 public class Elle<VarType, ValType> implements Checker<VarType, ValType> {
     public static final String NAME = "ELLE_TCC";
     public static IsolationLevel ISOLATION_LEVEL;
-    private static final String ELLE_CLI_PATH = "./resource/elle-cli-0.1.7-standalone.jar";
+    private static final String ELLE_CLI_PATH = "./third_party/elle-cli-0.1.7-standalone.jar";
     private static final String MODEL = "list-append";
     private static final String CONSISTENCY_MODEL = "causal-cerone";
     private static final String TMP_ELLE_HIST_EDN = "./tmp_elle_hist.edn";

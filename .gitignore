@@ -302,3 +302,34 @@ TSWLatexianTemp*
 
 ## WorkBuddy local workspace:
 .workbuddy/
+
+# Java / Maven
+target/
+dependency-reduced-pom.xml
+
+# Runtime artifacts
+current/
+result/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node / Vite
+node_modules/
+frontend/dist/
+
+# Local environment overrides (tracked .env files contain non-secret defaults)
+.env.local
+.env.*.local
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

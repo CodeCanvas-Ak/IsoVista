@@ -18,11 +18,11 @@ RUN apt update
 RUN apt install -y python3 python3-pip curl openjdk-11-jdk libgmp-dev libboost-log-dev
 
 # install Viper dependencies
-COPY resource ./resource
-RUN pip install --no-cache-dir --upgrade -U -r ./resource/Viper/src/docker/requirements.txt
+COPY third_party ./third_party
+RUN pip install --no-cache-dir --upgrade -U -r ./third_party/Viper/src/docker/requirements.txt
 
 # install MonoSAT
-WORKDIR resource/monosat
+WORKDIR third_party/monosat
 RUN apt install -y git g++ openjdk-11-jdk cmake libgmp-dev zlib1g-dev
 ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk
 RUN cmake -DJAVA=ON -DPYTHON=ON .
@@ -47,7 +47,7 @@ ENV PATH="/root/.nvm/versions/node/v${NODE_VERSION}/bin/:${PATH}"
 
 RUN npm install -g http-server
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci
 COPY frontend .
 RUN npm run build
 EXPOSE 8080

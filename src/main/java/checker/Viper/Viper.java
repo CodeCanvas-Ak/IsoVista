@@ -36,7 +36,7 @@ public class Viper<VarType, ValType> implements Checker<VarType, ValType> {
     private static final String TMP_HIST_PATH = "./viper_tmp/logs/json";
     private static final String PERF_PATH = "./viper_tmp/test_perf.txt";
     private static final String PYTHON_INTERPRETER = "python3";
-    private static final String PYTHON_MAIN_SCRIPT = "./resource/Viper/src/main_allcases.py";
+    private static final String PYTHON_MAIN_SCRIPT = "./third_party/Viper/src/main_allcases.py";
     private static final String CONFIG_PTH = "./viper_tmp/config.yaml";
     private static final Map<String, Object> configYamlMap;
     // magic words in perf file
