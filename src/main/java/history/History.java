@@ -90,8 +90,4 @@ public class History<KeyType, ValType> {
         }
         initTransaction.setSuccess(true);
     }
-
-    public void removeInitSession() {
-        sessions.remove(-1L);
-    }
 }

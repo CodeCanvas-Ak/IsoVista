@@ -33,27 +33,7 @@ const defaultOption = {
   profiler_enable: true
 }
 
-const testingOption = reactive({
-  db_url: 'jdbc:mysql://172.17.0.1:3306/',
-  db_type: 'MYSQL',
-  db_isolation: 'TRANSACTION_SERIALIZATION',
-  db_username: 'root',
-  db_password: 'dbtest_pwd',
-  workload_type: 'general',
-  workload_history: '1',
-  workload_session: '[5,10,15,20]',
-  workload_transaction: '100',
-  workload_operation: '5',
-  workload_key: '1000',
-  workload_readproportion: '0.5',
-  workload_variable: '',
-  workload_distribution: 'UNIFORM',
-  workload_skipgeneration: false,
-  history_path: 'user_history.txt',
-  history_type: 'text',
-  checker_isolation: ['SNAPSHOT_ISOLATION'],
-  profiler_enable: true
-});
+const testingOption = reactive(JSON.parse(JSON.stringify(defaultOption)));
 
 const savedOptions = reactive([]);
 
@@ -166,10 +146,11 @@ async function handleSubmit() {
   }
   console.log(testingOption)
   // save current config
+  const optionToSave = sanitizedOption(testingOption)
   let optionsArray = JSON.parse(localStorage.getItem('savedOptions') || '[]');
-  const isUnique = !optionsArray.some(option => JSON.stringify(option) === JSON.stringify(testingOption));
+  const isUnique = !optionsArray.some(option => JSON.stringify(sanitizedOption(option)) === JSON.stringify(optionToSave));
   if (isUnique) {
-    optionsArray.push(testingOption);
+    optionsArray.push(optionToSave);
     localStorage.setItem('savedOptions', JSON.stringify(optionsArray));
     loadSavedOptions();
   }
@@ -184,33 +165,31 @@ async function handleSubmit() {
   })
 }
 
-function initializeDefaultOption() {
-  if (!localStorage.getItem('Default')) {
-    localStorage.setItem('Default', JSON.stringify(defaultOption));
-  }
+function sanitizedOption(option) {
+  const copy = JSON.parse(JSON.stringify(option))
+  copy.db_password = ''
+  return copy
 }
+
 function loadSavedOptions() {
-  const options = JSON.parse(localStorage.getItem('savedOptions') || '[]');
+  const options = JSON.parse(localStorage.getItem('savedOptions') || '[]').map(sanitizedOption);
+  localStorage.setItem('savedOptions', JSON.stringify(options));
   savedOptions.splice(0, savedOptions.length, ...options);
+}
+
+const replaceTestingOption = (option) => {
+  for (const key in testingOption) {
+    delete testingOption[key];
+  }
+  Object.assign(testingOption, JSON.parse(JSON.stringify(option)));
 }
 
 const loadSetting = (command) => {
   if (command === 'default') {
-    for (const key in testingOption) {
-      delete testingOption[key];
-    }
-    Object.keys(defaultOption).forEach(key => {
-      testingOption[key] = defaultOption[key];
-    });
+    replaceTestingOption(defaultOption);
     return;
   }
-  const selectedSetting = savedOptions[command];
-  for (const key in testingOption) {
-    delete testingOption[key];
-  }
-  Object.keys(selectedSetting).forEach(key => {
-    testingOption[key] = selectedSetting[key];
-  });
+  replaceTestingOption(savedOptions[command]);
 }
 
 function clearStorage() {
@@ -219,7 +198,6 @@ function clearStorage() {
 }
 
 onMounted(() => {
-  initializeDefaultOption();
   loadSavedOptions();
 })
 

@@ -1,7 +1,6 @@
 package checker.elle;
 
 import checker.Checker;
-import checker.IsolationLevel;
 import config.Config;
 import exceptions.NotImplementedException;
 import history.History;
@@ -14,6 +13,8 @@ import util.utils;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -26,11 +27,9 @@ import static util.Profiler.updateMemory;
 @Slf4j
 public class Elle<VarType, ValType> implements Checker<VarType, ValType> {
     public static final String NAME = "ELLE_TCC";
-    public static IsolationLevel ISOLATION_LEVEL;
     private static final String ELLE_CLI_PATH = "./third_party/elle-cli-0.1.7-standalone.jar";
     private static final String MODEL = "list-append";
     private static final String CONSISTENCY_MODEL = "causal-cerone";
-    private static final String TMP_ELLE_HIST_EDN = "./tmp_elle_hist.edn";
     private final Properties config;
     private Map<String, Long> stageTime;
 
@@ -43,6 +42,7 @@ public class Elle<VarType, ValType> implements Checker<VarType, ValType> {
     private boolean runJar(String path) {
         // java -jar target/elle-cli-0.1.7-standalone.jar --model list-append --consistency-models snapshot-isolation histories/elle/list-append-gh-30.edn
         ProcessBuilder pb = new ProcessBuilder("java", "-jar", ELLE_CLI_PATH, "--model", MODEL, "--consistency-models", CONSISTENCY_MODEL, "--cycle-search-timeout", "10000000", path);
+        pb.redirectErrorStream(true);
 
         Process process = pb.start();
 
@@ -57,6 +57,8 @@ public class Elle<VarType, ValType> implements Checker<VarType, ValType> {
                 try {
                     Thread.sleep(100);
                 } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
                 }
             }
             log.info("Java memory monitor thread stopped");
@@ -64,65 +66,75 @@ public class Elle<VarType, ValType> implements Checker<VarType, ValType> {
         t.setDaemon(true);
         t.start();
 
-        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
         StringBuilder output = new StringBuilder();
-        String line;
-        while ((line = reader.readLine()) != null) {
-            log.info(line);
-            output.append(line);
+        try {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    log.info(line);
+                    output.append(line).append('\n');
+                }
+            }
+
+            // match stage time
+            String regex = "Stage ([\\w-]+) Time: (\\d+) ms";
+            Pattern pattern = Pattern.compile(regex);
+            Matcher matcher = pattern.matcher(output);
+
+            stageTime = new HashMap<>();
+
+            while (matcher.find()) {
+                String stageName = matcher.group(1);
+                long time = Long.parseLong(matcher.group(2));
+                stageTime.put(stageName, time);
+            }
+            stageTime.forEach((key, value) -> log.info(key + ": " + value + " ms"));
+
+            int exitCode = process.waitFor();
+            log.info("Elle-cli jar exited with code: " + exitCode);
+            return parseResult(output.toString(), exitCode);
+        } finally {
+            done.set(true);
+            t.interrupt();
+            RuntimeInfoRecorder.removePid(process.pid());
+        }
+    }
+
+    static boolean parseResult(String output, int exitCode) {
+        if (exitCode != 0) {
+            throw new IllegalStateException("Elle-cli exited with code " + exitCode);
         }
 
-        // match stage time
-        String regex = "Stage ([\\w-]+) Time: (\\d+) ms";
-        Pattern pattern = Pattern.compile(regex);
-        Matcher matcher = pattern.matcher(output);
-
-        stageTime = new HashMap<>();
-
-        while (matcher.find()) {
-            String stageName = matcher.group(1);
-            long time = Long.parseLong(matcher.group(2));
-            stageTime.put(stageName, time);
-        }
-        stageTime.forEach((key, value) -> log.info(key + ": " + value + " ms"));
-
-        // match true/false
         Pattern resultPattern = Pattern.compile("true|false");
         Matcher resultMatcher = resultPattern.matcher(output);
-
         String lastMatch = null;
-
         while (resultMatcher.find()) {
             lastMatch = resultMatcher.group();
         }
-
-        boolean result = true;
-        if (lastMatch != null) {
-            log.info("Elle-cli returned: " + lastMatch);
-            result = Boolean.parseBoolean(lastMatch);
-        } else {
-            log.error("No match true/false found in output");
+        if (lastMatch == null) {
+            throw new IllegalStateException("No true/false result found in Elle-cli output");
         }
 
-        int exitCode = process.waitFor();
-        done.set(true);
-        RuntimeInfoRecorder.removePid(process.pid());
-
-        log.info("Elle-cli jar exited with code: " + exitCode);
-        return result;
+        log.info("Elle-cli returned: " + lastMatch);
+        return Boolean.parseBoolean(lastMatch);
     }
 
     @Override
+    @SneakyThrows
     public boolean verify(History<VarType, ValType> history) {
-        boolean result;
-        if (config.getProperty(Config.HISTORY_TYPE, Config.DEFAULT_HISTORY_TYPE).equals("elle") && config.getProperty(Config.WORKLOAD_SKIP_GENERATION).equals("true")) {
-            new ElleHistorySerializer().serializeHistory((History<Integer, ElleHistoryLoader.ElleValue>) history, TMP_ELLE_HIST_EDN);
-            result = runJar(config.getProperty(Config.HISTORY_PATH));
-        } else {
-            new ElleHistorySerializer().serializeHistory((History<Integer, ElleHistoryLoader.ElleValue>) history, TMP_ELLE_HIST_EDN);
-            result = runJar(TMP_ELLE_HIST_EDN);
+        var historyType = config.getProperty(Config.HISTORY_TYPE, Config.DEFAULT_HISTORY_TYPE);
+        var skipGeneration = Boolean.parseBoolean(config.getProperty(Config.WORKLOAD_SKIP_GENERATION, "false"));
+        if ("elle".equalsIgnoreCase(historyType) && skipGeneration) {
+            return runJar(config.getProperty(Config.HISTORY_PATH));
         }
-        return result;
+
+        Path tempHistory = Files.createTempFile("isovista-", ".edn");
+        try {
+            new ElleHistorySerializer().serializeHistory((History<Integer, ElleHistoryLoader.ElleValue>) history, tempHistory.toString());
+            return runJar(tempHistory.toString());
+        } finally {
+            Files.deleteIfExists(tempHistory);
+        }
     }
 
     @Override
@@ -132,9 +144,12 @@ public class Elle<VarType, ValType> implements Checker<VarType, ValType> {
 
     @Override
     public Map<String, Long> getProfileInfo() {
-        return new HashMap<>() {{
-            put("Construction", stageTime.get("construction"));
-            put("Traversal", stageTime.get("scc") + stageTime.get("cycle-search"));
-        }};
+        if (stageTime == null) {
+            return Map.of();
+        }
+        Map<String, Long> profile = new HashMap<>();
+        profile.put("Construction", stageTime.getOrDefault("construction", 0L));
+        profile.put("Traversal", stageTime.getOrDefault("scc", 0L) + stageTime.getOrDefault("cycle-search", 0L));
+        return profile;
     }
 }

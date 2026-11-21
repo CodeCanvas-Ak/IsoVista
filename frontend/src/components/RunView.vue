@@ -584,6 +584,12 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearInterval(refreshInterval)
+  const charts = [profileTimeChart, profileMemoryChart, profileStagesChart, runTimeCPUChart, runTimeMemoryChart]
+  charts.forEach(chart => {
+    if (chart) {
+      chart.dispose()
+    }
+  })
 })
 
 watch(shouldRefresh, async (newVal) => {

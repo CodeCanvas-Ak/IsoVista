@@ -7,13 +7,14 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Data
@@ -44,21 +45,21 @@ public class RuntimeDataSerializer {
     public void outputToPath(int historyCount, int bugCount, Properties config, boolean enableProfiler) {
         // move all files in current dir
         var sourceDirectory = Paths.get(Config.DEFAULT_CURRENT_PATH);
-        Files.walk(sourceDirectory)
-                .filter(Files::isRegularFile)
-                .forEach(sourceFile -> {
-                    Path targetFile = outputPath.resolve(sourceDirectory.relativize(sourceFile));
-                    try {
-                        Files.createDirectories(targetFile.getParent());
-                        Files.move(sourceFile, targetFile);
-                    } catch (IOException e) {
-                        System.err.println("Failed to copy file: " + e.getMessage());
-                    }
-                });
+        List<Path> sourceFiles;
+        try (var paths = Files.walk(sourceDirectory)) {
+            sourceFiles = paths.filter(Files::isRegularFile).collect(Collectors.toList());
+        }
+        for (var sourceFile : sourceFiles) {
+            Path targetFile = outputPath.resolve(sourceDirectory.relativize(sourceFile));
+            Files.createDirectories(targetFile.getParent());
+            Files.move(sourceFile, targetFile);
+        }
 
-        // serialize config file
-        var configOutputStream = new FileOutputStream(Paths.get(outputPath.toString(), "config.properties").toString());
-        config.store(configOutputStream, "config properties");
+        // serialize config file without credentials; the runtime config remains unchanged
+        Properties archivedConfig = withoutSecrets(config);
+        try (var configOutputStream = new FileOutputStream(outputPath.resolve("config.properties").toFile())) {
+            archivedConfig.store(configOutputStream, "config properties");
+        }
 
         // serialize metadata
         Map<String, Object> outputMap = new HashMap<>();
@@ -79,5 +80,12 @@ public class RuntimeDataSerializer {
         log.info("{}", json);
         var metadataPath = Paths.get(outputPath.toString(), "metadata.json");
         Files.writeString(metadataPath, json);
+    }
+
+    static Properties withoutSecrets(Properties config) {
+        Properties archivedConfig = new Properties();
+        archivedConfig.putAll(config);
+        archivedConfig.remove(Config.DB_PASSWORD);
+        return archivedConfig;
     }
 }

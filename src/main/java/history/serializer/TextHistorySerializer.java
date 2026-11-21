@@ -3,10 +3,12 @@ package history.serializer;
 import history.History;
 import history.Operation;
 import history.Transaction;
+import javafx.util.Pair;
 import lombok.SneakyThrows;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
+import java.util.ArrayList;
 import java.util.Comparator;
 
 /**
@@ -29,6 +31,12 @@ public class TextHistorySerializer implements HistorySerializer<Long, Long> {
 
                     out.write(String.format("%s(%d,%d,%d,%d)%n", opType, key, value, session, txnId));
                 }
+            }
+
+            var abortedWrites = new ArrayList<>(history.getAbortedWrites());
+            abortedWrites.sort(Comparator.comparing((Pair<Long, Long> pair) -> pair.getKey()).thenComparing(Pair::getValue));
+            for (var write : abortedWrites) {
+                out.write(String.format("w(%d,%d,0,-1)%n", write.getKey(), write.getValue()));
             }
         }
     }

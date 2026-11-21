@@ -37,14 +37,11 @@ function handleDownload(row) {
   download_run(row.id).then(res => {
 
     const { data, headers } = res
-    const fileName = decodeURIComponent(escape(res.headers['file-name']))
-
-    //const blob = new Blob([JSON.stringify(data)], ...)
     const blob = new Blob([data], {type: headers['content-type']})
     let dom = document.createElement('a')
     let url = window.URL.createObjectURL(blob)
     dom.href = url
-    dom.download = decodeURI(fileName)
+    dom.download = `run-${row.id}.zip`
     dom.style.display = 'none'
     document.body.appendChild(dom)
     dom.click()
@@ -53,12 +50,11 @@ function handleDownload(row) {
   })
 }
 
-function handleStop(row) {
+async function handleStop(row) {
   console.log(row.id)
   try {
-    stop_run().then(res => {
-      console.log(res)
-    })
+    const res = await stop_run()
+    console.log(res)
   } catch (error) {
     console.error('Error:', error);
   }
@@ -75,6 +71,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   console.log("stop refresh list")
+  clearInterval(intervalRefreshLog)
   clearInterval(intervalRefreshList)
 })
 
@@ -140,6 +137,12 @@ watch(dialogVisible, (newVal) => {
               <el-progress v-else-if="row.status === 'Running'" :percentage="row.percentage" @click="dialogVisible = true"></el-progress>
               <el-tag v-else-if="row.status === 'Pending'" type="warning" size="large">
                 Pending
+              </el-tag>
+              <el-tag v-else-if="row.status === 'Failed'" type="danger" size="large">
+                Failed
+              </el-tag>
+              <el-tag v-else-if="row.status === 'Stopped'" type="info" size="large">
+                Stopped
               </el-tag>
             </template>
           </el-table-column>

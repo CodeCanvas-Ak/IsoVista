@@ -35,14 +35,11 @@ function handleDownload(row) {
   download_bug(row.id).then(res => {
 
     const { data, headers } = res
-    const fileName = decodeURIComponent(escape(res.headers['file-name']))
-
-    //const blob = new Blob([JSON.stringify(data)], ...)
     const blob = new Blob([data], {type: headers['content-type']})
     let dom = document.createElement('a')
     let url = window.URL.createObjectURL(blob)
     dom.href = url
-    dom.download = decodeURI(fileName)
+    dom.download = `bug-${row.id}.zip`
     dom.style.display = 'none'
     document.body.appendChild(dom)
     dom.click()

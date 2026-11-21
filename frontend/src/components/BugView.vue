@@ -1,6 +1,7 @@
 <script setup>
-import {defineProps, onMounted, ref} from 'vue'
+import {defineProps, onMounted, onUnmounted, ref} from 'vue'
 import G6, {Algorithm} from '@antv/g6';
+import {ElMessage} from 'element-plus'
 import {get_graph} from "@/api/api"
 import {insertCss} from 'insert-css'
 
@@ -36,14 +37,16 @@ let data_extend = {
   nodes: [],
   edges: []
 }
-let g = ref(G6.Graph);
+let g = null
 let bugName = ref("")
 
 const {detectDirectedCycle} = Algorithm;
 
 const handleDownloadPNG = () => {
   console.log("download png")
-  g.downloadFullImage('image', 'image/png')
+  if (g) {
+    g.downloadFullImage('image', 'image/png')
+  }
 }
 
 const downloadStringAsFile = (str, fileName) => {
@@ -113,7 +116,7 @@ onMounted(async () => {
         <li>Label: ${e.item.getModel().label || e.item.getModel().id}</li>
       </ul>
       <ul>
-        <li>Operations: <br> ${e.item.getModel().ops.replace(/\n/g, "<br>")}</li>
+        <li>Operations: <br> ${(e.item.getModel().ops || '').replace(/\n/g, "<br>")}</li>
       </ul>`;
       return outDiv;
     },
@@ -123,14 +126,15 @@ onMounted(async () => {
     getContent(evt) {
       let content = '';
       console.log(evt.item.getModel())
+      const label = evt.item.getModel().label || ''
       if (evt.item.getStates().length && evt.item.getStates()[0] === 'marked') {
         content += '<div>Unmark</div>';
       } else {
         content += '<div>Mark</div>';
       }
       content += '<div>Delete</div>';
-      if (evt.item._cfg.type === 'edge' && (evt.item.getModel().label.includes("CM")
-          || evt.item.getModel().label.includes("WW") || evt.item.getModel().label.includes("RW"))) {
+      if (evt.item._cfg.type === 'edge' && (label.includes("CM")
+          || label.includes("WW") || label.includes("RW"))) {
         if (evt.item.getModel().expanded) {
           content += '<div>Collapse</div>';
         } else {
@@ -195,17 +199,21 @@ onMounted(async () => {
 
   await get_graph(props.bug_id).then(res => {
     console.log(res.data)
-    bugName.value = res.data.name
+    bugName.value = res.data.name || "Bug"
+    if (res.data.message) {
+      ElMessage.warning(res.data.message)
+    }
     data.nodes = res.data.nodes
     data.edges = res.data.edges
     res.data.nodes.forEach(node => {
       node.depCount = 0
-      node.label = node.label.replace(/Transaction\(id=/g, 'Txn(\id')
+      node.label = (node.label || node.id).replace(/Transaction\(id=/g, 'Txn(\id')
     })
     res.data.edges.forEach(edge => {
       edge.expanded = false
       console.log(edge.relate_to.length)
       edge.depCount = 0
+      edge.label = edge.label || ''
 
       if (edge.style === "dotted") {
         edge.style = {lineDash: [2, 2]}
@@ -293,7 +301,7 @@ onMounted(async () => {
 // highlight cycle
   let cycleNodeList = []
   let cycleEdgeList = []
-  if (data.nodes[0].hasOwnProperty("in_cycle") && data.nodes[0].in_cycle !== null) {
+  if (data.nodes.length > 0 && data.nodes[0].hasOwnProperty("in_cycle") && data.nodes[0].in_cycle !== null) {
     console.log("data has cycle info")
     cycleEdgeList = data.edges.filter(edge => edge.in_cycle === "true").map(edge => {
       return {target: edge.target, source: edge.source}
@@ -345,6 +353,13 @@ onMounted(async () => {
       graph.changeSize(container.scrollWidth, container.scrollHeight);
     };
 });
+
+onUnmounted(() => {
+  window.onresize = null
+  if (g && !g.get('destroyed')) {
+    g.destroy()
+  }
+});
 </script>
 
 <template>
@@ -376,8 +391,6 @@ onMounted(async () => {
 .layout-container-demo .el-header {
   position: relative;
   text-align: center;
-  //background-color: var(--el-color-primary-light-7);
-  //color: var(--el-text-color-primary);
 }
 
 .layout-container-demo .el-main {

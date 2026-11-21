@@ -2,9 +2,10 @@ import checker.Checker;
 import checker.IsolationLevel;
 import collector.Collector;
 import config.Config;
+import exceptions.NotImplementedException;
 import generator.general.GeneralGenerator;
 import history.History;
-import history.serializer.TextHistorySerializer;
+import history.serializer.HistorySerializer;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
@@ -19,6 +20,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.Callable;
@@ -38,24 +40,27 @@ public class Main implements Callable<Integer> {
     public Integer call() {
         log.info("DBTest start");
         var config = new Properties();
-        var fileInputStream = new FileInputStream(configFile);
-        config.load(fileInputStream);
+        try (var fileInputStream = new FileInputStream(configFile)) {
+            config.load(fileInputStream);
+        }
         run(config);
         return 0;
     }
 
     @SneakyThrows
     public void run(Properties config) {
-        RuntimeInfoRecorder.start();
-        RuntimeStageRecorder.createCSV();
-
         var collectorReflections = new Reflections("collector");
         Set<Class<? extends Collector>> collectorSubClasses = collectorReflections.getSubTypesOf(Collector.class);
         Map<String, Class<? extends Collector>> collectors = new HashMap<>();
         for (var collectorImplClass : collectorSubClasses) {
             log.info("Find collector {}", collectorImplClass.getName());
             var name = (String) collectorImplClass.getDeclaredField("NAME").get(null);
-            collectors.put(name.toLowerCase(), collectorImplClass);
+            collectors.put(name.toLowerCase(Locale.ROOT), collectorImplClass);
+        }
+
+        var collector = collectors.get(config.getProperty(Config.DB_TYPE).toLowerCase(Locale.ROOT));
+        if (collector == null) {
+            throw new IllegalArgumentException("Unknown database type: " + config.getProperty(Config.DB_TYPE));
         }
 
         var checkerReflections = new Reflections("checker");
@@ -64,14 +69,12 @@ public class Main implements Callable<Integer> {
         for (var checkerImplClass : checkerImpls) {
             log.info("Find checker {}", checkerImplClass.getName());
             var name = (String) checkerImplClass.getDeclaredField("NAME").get(null);
-            checkers.put(name.toLowerCase(), checkerImplClass);
+            checkers.put(name.toLowerCase(Locale.ROOT), checkerImplClass);
         }
 
-        var collector = collectors.get(config.getProperty(Config.DB_TYPE).toLowerCase());
-        if (collector == null) {
-            log.error("Can not find collector of {}", config.getProperty(Config.DB_TYPE));
-            return;
-        }
+        Files.createDirectories(Paths.get(Config.DEFAULT_CURRENT_PATH));
+        RuntimeInfoRecorder.start();
+        RuntimeStageRecorder.createCSV();
 
         var isolationStr = config.getProperty(Config.CHECKER_ISOLATION);
         List<Triple<Class<? extends Checker>, IsolationLevel, String>> checkerIsoList = new ArrayList<>();
@@ -79,11 +82,11 @@ public class Main implements Callable<Integer> {
             var isolationList = ConfigParser.parseListString(isolationStr);
             for (var isolation : isolationList) {
                 var checkerIso = ConfigParser.parseIsolationConfig(isolation);
-                checkerIsoList.add(Triple.of(checkers.get(checkerIso.getKey().toLowerCase()), checkerIso.getRight(), isolation));
+                checkerIsoList.add(Triple.of(checkers.get(checkerIso.getKey().toLowerCase(Locale.ROOT)), checkerIso.getRight(), isolation));
             }
         } else {
             var checkerIso = ConfigParser.parseIsolationConfig(isolationStr);
-            checkerIsoList.add(Triple.of(checkers.get(checkerIso.getKey().toLowerCase()), checkerIso.getRight(), isolationStr));
+            checkerIsoList.add(Triple.of(checkers.get(checkerIso.getKey().toLowerCase(Locale.ROOT)), checkerIso.getRight(), isolationStr));
         }
 
         // TODO: remove ENABLE_PROFILER
@@ -121,16 +124,17 @@ public class Main implements Callable<Integer> {
                     log.info("Start history collection");
                     try {
                         var collectorInstance = collector.getDeclaredConstructor(Properties.class).newInstance(config);
-                        history = collectorInstance.collect(history);
-                        collectorInstance.close();
+                        try {
+                            history = collectorInstance.collect(history);
+                        } finally {
+                            collectorInstance.close();
+                        }
                     } catch (InstantiationException | InvocationTargetException | NoSuchMethodException |
                              IllegalAccessException e) {
                         throw new RuntimeException(e);
                     }
                 } else {
-                    var historyPath = config.getProperty(Config.HISTORY_PATH).toLowerCase();
-                    var historyType = config.getProperty(Config.HISTORY_TYPE).toLowerCase();
-                    history = HistoryLoaderFactory.getHistoryLoader(historyType).loadHistory(historyPath);
+                    history = loadHistory(config);
                 }
 
                 // verify history
@@ -161,14 +165,16 @@ public class Main implements Callable<Integer> {
                             // serialize history and output dotfile
                             var bugDir = Paths.get(Config.DEFAULT_CURRENT_PATH, String.format("bug_%d", bugCount.getAndIncrement()));
                             try {
-                                Files.createDirectory(bugDir);
+                                Files.createDirectories(bugDir);
                             } catch (IOException e) {
-                                // do nothing
+                                throw new RuntimeException("Failed to create bug directory " + bugDir, e);
                             }
-                            if (config.getOrDefault(Config.HISTORY_TYPE, Config.DEFAULT_HISTORY_TYPE) == Config.DEFAULT_HISTORY_TYPE) {
-                                new TextHistorySerializer().serializeHistory(history, Paths.get(bugDir.toString(), "bug_hist.txt").toString());
+                            outputBugHistory(history, config, bugDir);
+                            try {
+                                checkerInstance.outputDotFile(Paths.get(bugDir.toString(), "conflict.dot").toString());
+                            } catch (NotImplementedException e) {
+                                log.warn("Checker {} does not provide DOT output; the bug history is still archived", checker.getName());
                             }
-                            checkerInstance.outputDotFile(Paths.get(bugDir.toString(), "conflict.dot").toString());
                         } else {
                             log.info("NO BUG");
                         }
@@ -240,10 +246,32 @@ public class Main implements Callable<Integer> {
         RuntimeDataSerializer.getInstance(outputPath).outputToPath(historyNum * nBatch, bugCount.get(), config, enableProfile);
     }
 
+    static History loadHistory(Properties config) {
+        var historyPath = config.getProperty(Config.HISTORY_PATH);
+        var historyType = config.getProperty(Config.HISTORY_TYPE, Config.DEFAULT_HISTORY_TYPE).toLowerCase(Locale.ROOT);
+        return HistoryLoaderFactory.getHistoryLoader(historyType).loadHistory(historyPath);
+    }
+
+    static void outputBugHistory(History history, Properties config, Path bugDir) {
+        var historyType = config.getProperty(Config.HISTORY_TYPE, Config.DEFAULT_HISTORY_TYPE).toLowerCase(Locale.ROOT);
+        String fileName;
+        if (Config.DEFAULT_HISTORY_TYPE.equals(historyType)) {
+            fileName = "bug_hist.txt";
+        } else if ("elle".equals(historyType)) {
+            fileName = "bug_hist.edn";
+        } else {
+            throw new IllegalArgumentException("Unsupported history type: " + historyType);
+        }
+        HistorySerializer serializer = HistorySerializerFactory.getHistorySerializer(historyType);
+        serializer.serializeHistory(history, bugDir.resolve(fileName).toString());
+    }
+
     @SneakyThrows
     public static void main(String... args) {
         int exitCode = new CommandLine(new Main()).execute(args);
-        FileUtils.deleteDirectory(Paths.get(Config.DEFAULT_CURRENT_PATH).toFile());
+        if (exitCode == 0) {
+            FileUtils.deleteDirectory(Paths.get(Config.DEFAULT_CURRENT_PATH).toFile());
+        }
         System.exit(exitCode);
     }
 }

@@ -108,7 +108,6 @@ public class SERVerifier<KeyType, ValueType> {
     public void outputDotFile(String path) {
         if (intConflict != null) {
             var dotOutputStr = Utils.intConflictToDot(intConflict);
-            System.out.print(dotOutputStr);
             Files.writeString(Path.of(path), dotOutputStr, StandardOpenOption.CREATE);
             return;
         }

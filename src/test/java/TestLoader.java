@@ -8,7 +8,6 @@ import org.apache.commons.lang3.tuple.Triple;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @AllArgsConstructor
 public class TestLoader implements HistoryLoader<String, Integer> {

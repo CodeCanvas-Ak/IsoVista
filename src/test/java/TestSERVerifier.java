@@ -1,7 +1,11 @@
 import checker.PolySI.verifier.SERVerifier;
 import org.apache.commons.lang3.tuple.Triple;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -9,8 +13,12 @@ import java.util.Set;
 import static history.Operation.Type.READ;
 import static history.Operation.Type.WRITE;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestSERVerifier {
+	@TempDir
+	Path tempDir;
+
 	@Test
 	void readCommitted() {
 		var h = (new TestLoader(
@@ -134,7 +142,7 @@ public class TestSERVerifier {
 	}
 
 	@Test
-	void serializability() {
+	void serializability() throws IOException {
 		var h = (new TestLoader(
 			Set.of(0, 1, 2),
 			Map.of(0, List.of(0),
@@ -151,7 +159,9 @@ public class TestSERVerifier {
 
 		var verifier = new SERVerifier<>(h.loadHistory(null));
 		assertFalse(verifier.audit());
-		verifier.outputDotFile("./example.dot");
+		Path dotPath = tempDir.resolve("serializability.dot");
+		verifier.outputDotFile(dotPath.toString());
+		assertFalse(Files.readString(dotPath).isBlank());
 	}
 
     @Test
@@ -175,7 +185,7 @@ public class TestSERVerifier {
     }
 
     @Test
-    void example1() {
+    void example1() throws IOException {
         var h = new TestLoader(
             Set.of(0, 1, 2),
             Map.of(0, List.of(6, 1),
@@ -203,7 +213,9 @@ public class TestSERVerifier {
         );
 		var verifier = new SERVerifier<>(h.loadHistory(null));
         assertFalse(verifier.audit());
-		verifier.outputDotFile("./example.dot");
+		Path dotPath = tempDir.resolve("example.dot");
+		verifier.outputDotFile(dotPath.toString());
+		assertFalse(Files.readString(dotPath).isBlank());
     }
 
     @Test
@@ -320,5 +332,19 @@ public class TestSERVerifier {
         );
 
         assertFalse(new SERVerifier<>(loader.loadHistory(null)).audit());
+    }
+
+    @Test
+    void serializableHistory() {
+        var loader = new TestLoader(
+            Set.of(0, 1),
+            Map.of(0, List.of(0), 1, List.of(1)),
+            Map.of(
+                0, List.of(Triple.of(WRITE, "x", 1)),
+                1, List.of(Triple.of(READ, "x", 1))
+            )
+        );
+
+        assertTrue(new SERVerifier<>(loader.loadHistory(null)).audit());
     }
 }

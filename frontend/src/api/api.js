@@ -58,7 +58,7 @@ export function get_current_log() {
     return request.get(currentLogUrl)
 }
 
-const bugTagUrl = "/bug/tag/"
+const bugTagUrl = "/bug/tag"
 
 export function change_bug_tag(bug_id, tag_name, tag_type) {
     return request.post(bugTagUrl, {
