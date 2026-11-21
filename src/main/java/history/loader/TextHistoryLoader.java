@@ -55,7 +55,8 @@ public class TextHistoryLoader implements HistoryLoader<Long, Long> {
                 }
 
                 if (history.getTransaction(txn) == null) {
-                    history.addTransaction(history.getSession(session), txn);
+                    var transaction = history.addTransaction(history.getSession(session), txn);
+                    transaction.setSuccess(true);
                 }
 
                 history.addOperation(history.getTransaction(txn),

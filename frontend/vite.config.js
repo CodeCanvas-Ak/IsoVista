@@ -18,17 +18,12 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           const path = id.replaceAll('\\', '/')
-          if (path.includes('/node_modules/zrender/')) {
-            return 'chart-renderer'
+          // Visualization runtimes have circular internal dependencies; keep each one intact.
+          if (path.includes('/node_modules/zrender/') || path.includes('/node_modules/echarts/')) {
+            return 'chart'
           }
-          if (path.includes('/node_modules/echarts/')) {
-            if (path.includes('/lib/chart/') || path.endsWith('/echarts/charts.js')) return 'chart-types'
-            if (path.includes('/lib/component/') || path.endsWith('/echarts/components.js')) return 'chart-components'
-            return 'chart-core'
-          }
-          const antvPackage = path.match(/\/node_modules\/@antv\/([^/]+)\//)
-          if (antvPackage) {
-            return `graph-${antvPackage[1]}`
+          if (path.includes('/node_modules/@antv/')) {
+            return 'graph'
           }
         },
       },

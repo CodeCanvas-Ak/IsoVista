@@ -1,6 +1,6 @@
 <script setup>
 import {defineProps, onMounted, onUnmounted, ref} from 'vue'
-import { Arrow, Graph, Menu, ToolBar, Tooltip, Util } from '@antv/g6';
+import { Algorithm, Arrow, Graph, Menu, ToolBar, Tooltip, Util } from '@antv/g6';
 import {ElMessage} from 'element-plus'
 import {get_graph} from "@/api/api"
 import {insertCss} from 'insert-css'

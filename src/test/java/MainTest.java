@@ -40,6 +40,7 @@ class MainTest {
         History<Long, Long> history = new History<>();
         var session = history.addSession(0);
         var transaction = history.addTransaction(session, 0);
+        transaction.setSuccess(true);
         history.addOperation(transaction, Operation.Type.WRITE, 1L, 1L);
 
         Properties config = new Properties();

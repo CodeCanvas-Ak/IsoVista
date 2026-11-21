@@ -36,6 +36,18 @@ public class HistoryLoaderSerializerTest {
     }
 
     @Test
+    public void loadedTransactionsAreCommittedForCheckers(@TempDir Path tempDir) throws IOException {
+        Path historyPath = tempDir.resolve("committed_history.txt");
+        Files.writeString(historyPath, "w(1,1,0,0)\nr(1,1,1,1)\nw(9,9,2,-1)\n");
+
+        History<Long, Long> history = new TextHistoryLoader().loadHistory(historyPath.toString());
+
+        assertEquals(2, history.getTransactions().size());
+        assertTrue(history.getTransactions().values().stream().allMatch(txn -> txn.isSuccess()));
+        assertEquals(1, history.getAbortedWrites().size());
+    }
+
+    @Test
     public void invalidHistoryReportsLineNumber(@TempDir Path tempDir) throws IOException {
         Path historyPath = tempDir.resolve("invalid_history.txt");
         Files.writeString(historyPath, "w(1,1,0,0)\nnot-a-history\n");

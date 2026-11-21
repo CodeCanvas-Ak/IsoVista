@@ -112,6 +112,12 @@ npm run build
 
 # 正式集成镜像
 docker build --no-cache -t isovista .
+
+# 本机完整 Java 测试环境：先构建当前应用镜像，再复用其中的 JDK 11/native 资产
+# 不要用 Maven 3.6.3 代替；旧 Surefire 可能报告 BUILD SUCCESS 但实际发现 0 个 JUnit 5 用例
+docker build -t isovista:local .
+docker build -f scripts/standalone/test-env.Dockerfile -t isovista-test-env:local .
+docker run --rm -v "${PWD}:/workspace" -v isovista-m2:/root/.m2 -w /workspace isovista-test-env:local mvn -B clean test
 ```
 
 本地 Web 顺序：
@@ -126,24 +132,22 @@ docker build --no-cache -t isovista .
 | 项目 | 当前记录 |
 | --- | --- |
 | 后端语法与回归 | 2026-11-21：`compileall` 通过；`backend.test_main` 15 项通过，覆盖 URL 内嵌凭据清洗、Stopped 和 ZIP 异常清理 |
-| 前端生产构建 | 2026-11-21：Vite build 通过；路由懒加载、Element Plus/ECharts/G6 按需导入及 vendor 拆包后无 CSS 注释或大 chunk 警告，最大 chunk 468.74 kB，未提高警告阈值 |
+| 前端生产构建与浏览器运行时 | 2026-11-21：Vite build 通过；ECharts/ZRender 与 `@antv/*` 分别保留完整懒加载单元，修复拆包导致的初始化异常和 BugView 漏导入 `Algorithm`。`chart` 为 590.13 kB、`graph` 为 1500.81 kB，保留大 chunk 提示且未提高阈值 |
 | Java 定向回归、打包与 CLI | 2026-11-21：Linux JDK 11.0.33 下 16 项定向测试通过，shaded JAR 打包通过；覆盖 Elle 异常回收与结果口径、`db.type` 缺键、URL 脱敏落盘和 TCC 映射。未知数据库按预期非零退出，不再先触发 native 错误，失败时保留 `current/` |
-| Java 全量测试 | 已实际执行 `mvn -B clean test`，但验证环境缺少 `libmonosat.so`，23 个 SI/SER solver 用例以 `UnsatisfiedLinkError` 阻断；不得记为全量通过 |
+| Java 全量测试 | 2026-11-21：本机 Docker 内 Linux JDK 11、Maven 3.9.11、UTF-8 下 `mvn -B clean test` 实际执行 **50 项，0 failure、0 error、0 skipped**；SI 16、SER 17 个 native solver 用例通过， shaded JAR 打包通过。复测入口见 `scripts/standalone/test-env.Dockerfile` |
+| 真实 MySQL 与 Viper | 2026-11-21：MySQL 9.3 专用 `dbtest` 正向生成/采集成功，PolySI `NO BUG`、Viper `sat: True`；同一已知 SI 异常经 PolySI 与 Viper 均检出（`sat: False`、`bug_count=2`）。修复了 text loader 未提交事务导致 Viper 忽略写操作的问题，普通提交与 aborted write 均有回归测试 |
 | 真实 Elle/TCC 核验 | 最新 shaded JAR 下配置映射为 `CAUSAL_CONSISTENCY`；真实 elle-cli `causal-cerone` 对合法 list-append 正例返回 `true`，对因果环负例返回 `false`（退出码 1），Java 均按 verdict 接收；C4 对 `yugabyte_tcc.txt` 判定为 `false` |
-| Docker、数据库、真实 Web 端到端 | 当前记录为未验证；真实 elle-cli 定向验证不覆盖 Viper、MonoSAT、数据库或 Web 全链路 |
+| Docker、数据库、真实 Web 端到端 | 2026-11-21：完整 Ubuntu 22.04 镜像已实际构建并启动；Ego Browser 验证真实 MySQL 运行、历史上传、PolySI+Viper 双检出、Runs/Bugs 列表、Run 详情图表、Bug 详情图形组件、Run/Bug ZIP 下载与 Stop。最终镜像重新创建干净容器后，真实 MySQL Run 1 再次 `Finished / 100%`，Ego 复验 Runs 为 Healthy、Run 详情 5 个 canvas，运行时/控制台/网络错误均为 0 |
 
 ## 3. 当前风险
-
-### P0：先补齐可信基线
-
-- JDK 11 定向回归和打包已建立记录；仍需在具备 MonoSAT 原生库的环境重跑全量 SI/SER 测试，不要把 JDK 25 的 Lombok 生成成员缺失或 native 环境缺失误报为业务断言失败。
 
 ### P1：影响实验与维护
 
 - 后端运行共享固定配置和 `current/`，并行运行会互相污染；并发扩展前必须先隔离工作目录。
-- 后端已有 15 项隔离单元回归，但仍缺真实 Web 端到端和前端组件自动化；构建成功不等于实验闭环成功。
+- 已有真实浏览器端到端记录，但没有持久化的前端组件/E2E 自动化；修改可视化拆包、路由或图形组件后必须重跑浏览器冒烟，不能只依赖 Vite build。
 - `yugabyte_tcc.txt` 是 text RW-register 历史，Elle 使用 list-append EDN；两者没有通用等价转换，当前分别用于 C4 与真实 EDN 核验，不得混用 verdict 口径。
-- DOT 缺文件、缺可选属性和解析失败已有空图降级，复杂图的正确性仍需端到端核验；`Elle.outputDotFile()` 当前未实现，只能保证历史归档，不能宣称具备可视化闭环。
+- DOT 缺文件、缺可选属性和解析失败已有空图降级；Viper、Elle 的 DOT 输出仍有未实现路径，不能把 Bug 页面可打开等同于所有 checker 都具备冲突图闭环。
+- `chart` 与 `graph` 为避免运行时循环初始化错误而保留完整懒加载单元，当前有大 chunk 提示；后续体积优化必须同时验证 Run/Bug 路由。
 - 当前 artifact 尚未统一记录代码版本、输入哈希、环境和全部非结论状态，论文对比前必须补齐。
 
 ## 4. 执行路线
@@ -158,6 +162,6 @@ docker build --no-cache -t isovista .
 | 阶段 3 | 图数据契约、异常解释与演示闭环 | 08 |
 | 阶段 4 | 论文、干净环境复现与答辩交付 | 11 |
 
-**当前只从阶段 0 开始。** SQL IR、完整插件框架、reducer、历史合成和大规模数据库扩展均不阻塞主线。
+**阶段 0 的本机工程基线与 CLI/Web 冒烟已完成，当前从阶段 1 开始。** SQL IR、完整插件框架、reducer、历史合成和大规模数据库扩展均不阻塞主线。
 
 修改目录、入口、配置键、API、结果字段或测试命令后，同步更新本文及直接消费者；阶段性流水账和长期设计细节不要写入本文件。
