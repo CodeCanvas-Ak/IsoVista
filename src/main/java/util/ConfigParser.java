@@ -29,7 +29,7 @@ public class ConfigParser {
         ConfigToCheckerIsolationMap.put("SERIALIZABLE", Pair.of("SMT_SER", IsolationLevel.SERIALIZABLE));
         ConfigToCheckerIsolationMap.put("VIPER_SNAPSHOT_ISOLATION", Pair.of("Viper", IsolationLevel.SNAPSHOT_ISOLATION));
         ConfigToCheckerIsolationMap.put("POLYSI+_SNAPSHOT_ISOLATION", Pair.of("SMT_SI", IsolationLevel.SNAPSHOT_ISOLATION));
-        ConfigToCheckerIsolationMap.put("ELLE_TRANSACTIONAL_CAUSAL_CONSISTENCY", Pair.of("ELLE_TCC", IsolationLevel.SNAPSHOT_ISOLATION));
+        ConfigToCheckerIsolationMap.put("ELLE_TRANSACTIONAL_CAUSAL_CONSISTENCY", Pair.of("ELLE_TCC", IsolationLevel.CAUSAL_CONSISTENCY));
 
         IsolationAbbreviation.put("READ_COMMITTED", "RC");
         IsolationAbbreviation.put("REPEATABLE_READ", "RR");

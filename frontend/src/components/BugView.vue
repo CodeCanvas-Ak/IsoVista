@@ -1,6 +1,6 @@
 <script setup>
 import {defineProps, onMounted, onUnmounted, ref} from 'vue'
-import G6, {Algorithm} from '@antv/g6';
+import { Arrow, Graph, Menu, ToolBar, Tooltip, Util } from '@antv/g6';
 import {ElMessage} from 'element-plus'
 import {get_graph} from "@/api/api"
 import {insertCss} from 'insert-css'
@@ -95,7 +95,7 @@ const handleDownloadDot = () => {
 }
 
 onMounted(async () => {
-  const tooltip = new G6.Tooltip({
+  const tooltip = new Tooltip({
     offsetX: 10,
     offsetY: 0,
     fixToNode: [1, 0],
@@ -122,7 +122,7 @@ onMounted(async () => {
     },
   });
 
-  const menu = new G6.Menu({
+  const menu = new Menu({
     getContent(evt) {
       let content = '';
       console.log(evt.item.getModel())
@@ -190,7 +190,7 @@ onMounted(async () => {
     },
   });
 
-  const toolbar = new G6.ToolBar({
+  const toolbar = new ToolBar({
     position: {
       x: 230,
       y: 80
@@ -241,7 +241,7 @@ onMounted(async () => {
   const width = container.scrollWidth;
   const height = container.scrollHeight || 1100;
 
-  const graph = new G6.Graph({
+  const graph = new Graph({
     container: 'container',
     width,
     height,
@@ -267,7 +267,7 @@ onMounted(async () => {
       },
       style: {
         endArrow: {
-          path: G6.Arrow.vee(10, 10, 34),
+          path: Arrow.vee(10, 10, 34),
           d: 34,
         }
       },
@@ -288,7 +288,7 @@ onMounted(async () => {
     },
   });
 
-  G6.Util.processParallelEdges(data.edges, 20, 'quadratic', 'line', 'loop');
+  Util.processParallelEdges(data.edges, 20, 'quadratic', 'line', 'loop');
   graph.data(data);
   graph.layout()
   graph.render();

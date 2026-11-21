@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -41,10 +42,13 @@ public class RuntimeDataSerializer {
     }
 
 
-    @SneakyThrows
     public void outputToPath(int historyCount, int bugCount, Properties config, boolean enableProfiler) {
+        outputToPath(historyCount, bugCount, config, enableProfiler, Paths.get(Config.DEFAULT_CURRENT_PATH));
+    }
+
+    @SneakyThrows
+    void outputToPath(int historyCount, int bugCount, Properties config, boolean enableProfiler, Path sourceDirectory) {
         // move all files in current dir
-        var sourceDirectory = Paths.get(Config.DEFAULT_CURRENT_PATH);
         List<Path> sourceFiles;
         try (var paths = Files.walk(sourceDirectory)) {
             sourceFiles = paths.filter(Files::isRegularFile).collect(Collectors.toList());
@@ -82,10 +86,24 @@ public class RuntimeDataSerializer {
         Files.writeString(metadataPath, json);
     }
 
+    private static final Pattern URL_CREDENTIAL_PARAMETER = Pattern.compile(
+            "(?i)([?;&](?:password|pwd|pass|token|access_token|secret)=)([^&#;]*)");
+    private static final Pattern URL_USER_INFO_PASSWORD = Pattern.compile("(?i)(//[^/\\s:@]+:)[^@/\\s]+@");
+    private static final String REDACTED = "<redacted>";
+
     static Properties withoutSecrets(Properties config) {
         Properties archivedConfig = new Properties();
         archivedConfig.putAll(config);
         archivedConfig.remove(Config.DB_PASSWORD);
+        String databaseUrl = archivedConfig.getProperty(Config.DB_URL);
+        if (databaseUrl != null) {
+            archivedConfig.setProperty(Config.DB_URL, sanitizeDatabaseUrl(databaseUrl));
+        }
         return archivedConfig;
+    }
+
+    private static String sanitizeDatabaseUrl(String databaseUrl) {
+        String sanitized = URL_CREDENTIAL_PARAMETER.matcher(databaseUrl).replaceAll("$1" + REDACTED);
+        return URL_USER_INFO_PASSWORD.matcher(sanitized).replaceAll("$1" + REDACTED + "@");
     }
 }

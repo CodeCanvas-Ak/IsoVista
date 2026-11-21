@@ -40,11 +40,7 @@ public class Elle<VarType, ValType> implements Checker<VarType, ValType> {
 
     @SneakyThrows
     private boolean runJar(String path) {
-        // java -jar target/elle-cli-0.1.7-standalone.jar --model list-append --consistency-models snapshot-isolation histories/elle/list-append-gh-30.edn
-        ProcessBuilder pb = new ProcessBuilder("java", "-jar", ELLE_CLI_PATH, "--model", MODEL, "--consistency-models", CONSISTENCY_MODEL, "--cycle-search-timeout", "10000000", path);
-        pb.redirectErrorStream(true);
-
-        Process process = pb.start();
+        Process process = startProcess(path);
 
         RuntimeInfoRecorder.addPid(process.pid());
 
@@ -96,12 +92,23 @@ public class Elle<VarType, ValType> implements Checker<VarType, ValType> {
         } finally {
             done.set(true);
             t.interrupt();
+            if (process.isAlive()) {
+                process.destroy();
+            }
             RuntimeInfoRecorder.removePid(process.pid());
         }
     }
 
+    Process startProcess(String path) throws java.io.IOException {
+        // java -jar target/elle-cli-0.1.7-standalone.jar --model list-append --consistency-models snapshot-isolation histories/elle/list-append-gh-30.edn
+        ProcessBuilder pb = new ProcessBuilder("java", "-jar", ELLE_CLI_PATH, "--model", MODEL, "--consistency-models", CONSISTENCY_MODEL, "--cycle-search-timeout", "10000000", path);
+        pb.redirectErrorStream(true);
+        return pb.start();
+    }
+
     static boolean parseResult(String output, int exitCode) {
-        if (exitCode != 0) {
+        // elle-cli uses exit code 1 for a valid history evaluation that violates the model.
+        if (exitCode != 0 && exitCode != 1) {
             throw new IllegalStateException("Elle-cli exited with code " + exitCode);
         }
 
@@ -113,6 +120,9 @@ public class Elle<VarType, ValType> implements Checker<VarType, ValType> {
         }
         if (lastMatch == null) {
             throw new IllegalStateException("No true/false result found in Elle-cli output");
+        }
+        if (exitCode == 1 && !"false".equals(lastMatch)) {
+            throw new IllegalStateException("Elle-cli exited with code 1 but returned " + lastMatch);
         }
 
         log.info("Elle-cli returned: " + lastMatch);

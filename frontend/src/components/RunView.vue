@@ -1,6 +1,28 @@
 <script setup>
-import * as echarts from 'echarts';
+import * as echarts from 'echarts/core'
+import { BarChart, LineChart } from 'echarts/charts'
+import {
+  GridComponent,
+  LegendComponent,
+  MarkAreaComponent,
+  ToolboxComponent,
+  TooltipComponent,
+  VisualMapComponent,
+} from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import {defineProps, onMounted, onUnmounted, ref, watch} from "vue";
+
+echarts.use([
+  BarChart,
+  LineChart,
+  GridComponent,
+  LegendComponent,
+  MarkAreaComponent,
+  ToolboxComponent,
+  TooltipComponent,
+  VisualMapComponent,
+  CanvasRenderer,
+])
 import {
   get_current_profile,
   get_current_run_id,

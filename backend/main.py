@@ -256,9 +256,29 @@ def run_task(params: Any = Body(None)):
     return {}
 
 
+URL_CREDENTIAL_PARAMETER_RE = re.compile(
+    r"([?;&](?:password|pwd|pass|token|access_token|secret)=)([^&#;]*)",
+    re.IGNORECASE,
+)
+URL_USER_INFO_PASSWORD_RE = re.compile(r"(//[^/\s:@]+:)[^@/\s]+@", re.IGNORECASE)
+
+
+def sanitize_database_url(database_url):
+    sanitized = URL_CREDENTIAL_PARAMETER_RE.sub(r"\1<redacted>", database_url)
+    return URL_USER_INFO_PASSWORD_RE.sub(r"\1<redacted>@", sanitized)
+
+
 def without_database_password(config):
-    return ''.join(line for line in config.splitlines(keepends=True)
-                   if not line.startswith('db.password='))
+    archived_lines = []
+    for line in config.splitlines(keepends=True):
+        content = line.rstrip("\r\n")
+        line_ending = line[len(content):]
+        if content.startswith("db.password="):
+            continue
+        if content.startswith("db.url="):
+            content = "db.url=" + sanitize_database_url(content[len("db.url="):])
+        archived_lines.append(content + line_ending)
+    return ''.join(archived_lines)
 
 
 def record_failed_run(config, error, status="Failed"):

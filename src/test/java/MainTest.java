@@ -65,6 +65,14 @@ class MainTest {
     }
 
     @Test
+    void missingDatabaseTypeFailsWithClearConfigError() {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> new Main().run(new Properties()));
+
+        assertEquals("Missing required configuration: db.type", error.getMessage());
+    }
+
+    @Test
     void unknownDatabaseFailsBeforeCheckerInitialization() {
         Properties config = new Properties();
         config.setProperty(Config.DB_TYPE, "not-a-database");

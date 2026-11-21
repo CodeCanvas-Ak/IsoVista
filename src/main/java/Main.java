@@ -58,9 +58,13 @@ public class Main implements Callable<Integer> {
             collectors.put(name.toLowerCase(Locale.ROOT), collectorImplClass);
         }
 
-        var collector = collectors.get(config.getProperty(Config.DB_TYPE).toLowerCase(Locale.ROOT));
+        var databaseType = config.getProperty(Config.DB_TYPE);
+        if (databaseType == null) {
+            throw new IllegalArgumentException("Missing required configuration: " + Config.DB_TYPE);
+        }
+        var collector = collectors.get(databaseType.toLowerCase(Locale.ROOT));
         if (collector == null) {
-            throw new IllegalArgumentException("Unknown database type: " + config.getProperty(Config.DB_TYPE));
+            throw new IllegalArgumentException("Unknown database type: " + databaseType);
         }
 
         var checkerReflections = new Reflections("checker");

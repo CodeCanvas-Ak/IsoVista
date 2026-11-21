@@ -152,6 +152,51 @@ class BackendMainTest(unittest.TestCase):
             runtime_config = (root / "config.properties").read_text(encoding="utf-8")
             self.assertIn("db.password=secret", runtime_config)
 
+    def test_stop_request_records_stopped_run_and_resets_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result_path = root / "result"
+            process = mock.Mock()
+            process.poll.return_value = None
+
+            def wait_after_stop():
+                response = asyncio.run(self.main.stop_run())
+                self.assertEqual({"message": "Stop requested"}, response)
+                return -15
+
+            process.wait.side_effect = wait_after_stop
+            run_store = self.main.RunStore(str(result_path))
+            with mock.patch.object(self.main, "config_path", str(root / "config.properties")), \
+                    mock.patch.object(self.main, "result_path", str(result_path)), \
+                    mock.patch.object(self.main, "current_path", str(root / "current")), \
+                    mock.patch.object(self.main, "current_log_path", str(root / "current" / "output.log")), \
+                    mock.patch.object(self.main, "bug_store", self.main.BugStore(str(result_path))), \
+                    mock.patch.object(self.main, "run_store", run_store), \
+                    mock.patch.object(self.main.subprocess, "Popen", return_value=process):
+                self.main.execute_run("db.type=MYSQL\ndb.isolation=SER\nchecker.isolation=[]\nworkload.history=1\n")
+
+            metadata_path = next(result_path.glob("run_*/metadata.json"))
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            self.assertEqual("Stopped", metadata["status"])
+            self.assertIn("code -15", metadata["error"])
+            self.assertEqual("Stopped", run_store.get(1).status)
+            process.terminate.assert_called_once_with()
+
+        self.assertEqual("", self.main.current_run)
+        self.assertIsNone(self.main.process)
+
+    def test_config_archiving_sanitizes_embedded_url_credentials(self):
+        config = ("db.type=MYSQL\n"
+                  "db.url=jdbc:mysql://user:userinfo-secret@localhost:3306/db?user=user&password=query-secret&useSSL=false&pwd=pwd-secret&token=token-secret&passwordPolicy=keep\n"
+                  "db.password=property-secret\n")
+
+        archived = self.main.without_database_password(config)
+
+        self.assertIn("db.url=jdbc:mysql://user:<redacted>@localhost:3306/db?user=user&password=<redacted>&useSSL=false&pwd=<redacted>&token=<redacted>&passwordPolicy=keep\n", archived)
+        self.assertNotIn("db.password=", archived)
+        for secret in ("userinfo-secret", "query-secret", "pwd-secret", "token-secret", "property-secret"):
+            self.assertNotIn(secret, archived)
+
     def test_invalid_metadata_is_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -208,6 +253,28 @@ class BackendMainTest(unittest.TestCase):
 
             asyncio.run(response.background())
             self.assertFalse(zip_path.exists())
+
+    def test_zip_download_removes_partial_file_when_packing_fails(self):
+        item = mock.Mock()
+        item.zip.side_effect = RuntimeError("pack failed")
+        created_paths = []
+        real_mkstemp = tempfile.mkstemp
+
+        def tracked_mkstemp(*args, **kwargs):
+            descriptor, path = real_mkstemp(*args, **kwargs)
+            created_paths.append(path)
+            return descriptor, path
+
+        try:
+            with mock.patch.object(self.main.tempfile, "mkstemp", side_effect=tracked_mkstemp):
+                with self.assertRaisesRegex(RuntimeError, "pack failed"):
+                    self.main.zip_download_response(item, "run-1.zip")
+
+            self.assertEqual(1, len(created_paths))
+            self.assertFalse(Path(created_paths[0]).exists())
+        finally:
+            for path in created_paths:
+                Path(path).unlink(missing_ok=True)
 
     def test_profile_result_preserves_dto(self):
         with tempfile.TemporaryDirectory() as tmp:
