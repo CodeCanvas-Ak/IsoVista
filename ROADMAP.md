@@ -1,211 +1,112 @@
-# IsoVista 代码地图与毕设路线图
+# IsoVista 代码地图
 
-> 盘点日期：2026-11-20
+> 代码核对基线：`85ad47f35e7f61039823f010dce937a70adb3c11`（2026-11-21）。
 >
-> 代码基线：`0f5719c0eb781a04e53932b1e2da243403e1eb92`（`main`）
->
-> 阅读范围：第一方 Java、Python、Vue 源码，配置、测试、CI、启动脚本、现有规划文档；第三方子模块内部实现不作为第一方代码展开。
->
-> 状态约定：未特别标注的内容为上述基线的代码事实；「规划」「风险」「待验证」不得当作已实现能力。
+> 本文只维护当前代码事实、配置与运行、已知风险和执行入口。目标态设计在 [docs/plans/](docs/plans/README.md)，完整单人路线在 [11-roadmap](docs/plans/11-roadmap.md)；规划内容不得当作已实现能力。
 
-## 1. 给后续 Agent 的 60 秒导览
+## 1. 代码地图
 
-IsoVista 当前是一个**数据库事务历史生成、采集、隔离级别验证与结果可视化工具**。它有三条实际组成链路：
+### 1.1 三条主链路
 
-1. Java CLI 是核心：生成或加载历史，调用 collector 在数据库中执行，再选择一个或多个 checker 验证。
-2. FastAPI 是文件与子进程编排层：维护运行队列，写入 `config.properties`，通过 `java -jar` 启动核心，读取 `current/` 与 `result/`。
-3. Vue 是展示层：配置实验、查看运行与 bug、解析 DOT 图、展示 profile 和运行时指标。
-
-**毕设推荐主线**：优先做成「多隔离级别检查器的统一、可复现实验与可视化平台」。先把基线、回归样例、实验矩阵、结果 manifest 和论文图表做扎实；历史合成、复杂 reducer 和新负载生成作为后续扩展，不要同时铺开全部规划。
-
-继续工作前只需按任务阅读本文件对应小节及 `docs/plans/` 的一篇专题文档。修改目录、入口、配置键、API 或测试命令后，必须同步更新本文件。
-
-## 2. 整理后的仓库结构
+- **Java CLI 核心**：生成或加载历史，调用 collector 在数据库执行，再由一个或多个 checker 验证。
+- **FastAPI 编排层**：串行消费运行队列，写入配置并启动 shaded JAR，读取 `current/` 与 `result/`。
+- **Vue 展示层**：配置实验、查看运行与 bug，使用 G6 展示依赖图、ECharts 展示指标。
 
 ```text
-IsoVista/
-├── src/
-│   ├── main/java/
-│   │   ├── Main.java                 # CLI 与实验主流程
-│   │   ├── checker/                 # C4、PolySI、Viper、Elle、VeriStrong
-│   │   ├── collector/               # 数据库执行与结果采集
-│   │   ├── config/Config.java       # 配置键与默认路径
-│   │   ├── generator/               # general、TPCC 历史生成
-│   │   ├── history/                 # 历史模型、loader、serializer
-│   │   └── util/                    # 配置映射、性能与运行时记录
-│   ├── main/resources/              # 日志配置、原生动态库
-│   └── test/java/                   # JUnit 5 测试
-├── backend/
-│   ├── main.py                      # FastAPI、运行队列、结果读取
-│   └── requirements.txt
-├── frontend/
-│   ├── src/api/                     # 与 FastAPI 对应的请求封装
-│   ├── src/components/              # 配置、运行、bug、图与侧栏
-│   ├── package.json
-│   └── package-lock.json            # 锁定前端依赖，支持 npm ci
-├── docs/
-│   ├── plans/                       # 01～11 目标态设计稿
-│   ├── images/                      # README 与使用文档配图
-│   ├── how-to-check-a-new-database.md
-│   ├── how-to-implement-a-new-checker.md
-│   └── use-cases.md
-├── examples/histories/              # 已收集的 bug 历史样例
-├── third_party/                     # Viper、MonoSAT、Elle CLI；勿手改
-├── scripts/standalone/              # MySQL、PostgreSQL Docker Compose
-├── .github/workflows/               # Maven 测试、Docker 镜像发布
-├── config.properties                # 本地默认配置，含待替换示例路径
-├── Dockerfile
-├── run.sh                           # 容器内前端与后端启动脚本
-├── pom.xml                          # Java 11、依赖与 shaded JAR
-├── AGENTS.md                        # 极简 Agent 路由与硬约束
-└── ROADMAP.md                       # 当前代码事实、验证记录与执行路线
+properties / uploaded history
+             │
+             ▼
+Generator / Loader ──▶ Collector ──▶ History ──▶ Checkers
+                           │                       │
+                           └──── observed values   ├─▶ current/bug_N
+                                                   └─▶ profiles + result
+FastAPI：queue → config.properties → java -jar → current/ + result/
+Vue：Configuration / RunList / RunView / BugList / BugView
 ```
 
-本次目录归位关系：`ai/plan → docs/plans`、`images → docs/images`、`history/bugs → examples/histories`、`resource → third_party`。原 `ai/meta/project-overview.md` 已合并并改写为本文件，避免两份代码导览互相漂移。
+### 1.2 目录与代码锚点
 
-### 文档路由
-
-| 要做什么 | 阅读顺序 |
-| --- | --- |
-| 了解总体目标与模块边界 | 本文件 → `docs/plans/01-vision-and-architecture.md` |
-| 建回归历史与基准套件 | `docs/plans/02-benchmark-suite.md` |
-| 改负载、执行或采集 | `docs/plans/03-workload-generator.md`、`04-executor-and-logger.md` |
-| 改 checker | `docs/plans/06-history-checkers.md` + 对应实现和测试 |
-| 做 bug 缩减 | `docs/plans/07-bug-reducer.md` |
-| 做图和展示 | `docs/plans/08-visualization.md` |
-| 做性能对比与自动实验 | `docs/plans/09-performance-analysis.md`、`10-experiment-automation.md` |
-| 看原始阶段规划 | `docs/plans/11-roadmap.md`；执行任务以本文件第 8 节为准 |
-
-## 3. Java 核心调用链
-
-### 3.1 主入口与运行流程
-
-核心入口是 `src/main/java/Main.java`：
-
-- `Main.call()`：从 CLI 第一个参数读取 properties 文件。
-- `Main.run()`（`Main.java:48`）：扫描 `collector` 与 `checker` 包，通过每个实现的静态 `NAME` 注册（`Main.java:52-68`）。
-- `Main.runOneShot`（`Main.java:111`）：执行一个批次中的全部历史。
-- 生成模式（`Main.java:114-130`）：`GeneralGenerator` 生成历史，再由 collector 在数据库中执行并回填结果。
-- 加载模式（`Main.java:131-134`）：按 `history.type` 选择 loader，从 `history.path` 加载。
-- 验证模式（`Main.java:137-177`）：一个历史可依次交给多个 checker；失败时写入 `current/bug_N/` 下的 `bug_hist.txt` 与 `conflict.dot`。
-- 参数扫描（`Main.java:200-218`）：`workload.variable` 指定变量名，对应列表值逐批覆盖配置。
-- 收尾（`Main.java:240`）：`RuntimeDataSerializer` 将配置、日志、profile、bug 等输出到 `output.path`，默认 `./result`。
-
-CLI 的 `main()` 最后会清理 `./current`；运行中的 Web 后端则依赖该目录提供实时日志和进度，因此不要用另一个 CLI 进程同时操作同一工作目录。
-
-### 3.2 配置与隔离级别映射
-
-`config/Config.java` 定义实际配置键；根目录 `config.properties` 使用同一套点号键：
-
-| 配置键 | 作用 |
-| --- | --- |
-| `db.url` / `db.username` / `db.password` | JDBC 连接 |
-| `db.type` | collector 注册名 |
-| `db.isolation` | JDBC 事务隔离级别 |
-| `workload.skipgeneration` | `false` 生成并采集；`true` 加载已有历史 |
-| `workload.history/session/transaction/operation` | 历史、会话、事务、操作规模 |
-| `workload.readproportion/key/distribution` | 读写比例、键空间、键分布 |
-| `workload.variable` | 可选的批量扫描变量 |
-| `history.path` / `history.type` | 历史文件与格式，当前为 `text` 或 `elle` |
-| `checker.isolation` | 单个隔离配置或列表，如 `['SNAPSHOT_ISOLATION']` |
-| `profiler.enable` / `output.path` | 性能记录与结果目录 |
-
-`util/ConfigParser.java` 是隔离配置到 checker 的唯一映射入口：
-
-| `checker.isolation` 值 | 实际实现 |
-| --- | --- |
-| `READ_COMMITTED` | `checker.C4.C4` |
-| `REPEATABLE_READ` | `checker.C4.C4` |
-| `READ_ATOMICITY` | `checker.C4.C4` |
-| `TRANSACTIONAL_CAUSAL_CONSISTENCY` | `checker.C4.C4`，内部可使用 `C4List` |
-| `SNAPSHOT_ISOLATION` | `checker.PolySI.PolySI` |
-| `SERIALIZABLE` | `checker.VeriStrong_SER.SMTCheckerSER` |
-| `VIPER_SNAPSHOT_ISOLATION` | `checker.Viper.Viper` |
-| `POLYSI+_SNAPSHOT_ISOLATION` | `checker.VeriStrong_SI.SMTCheckerSI` |
-| `ELLE_TRANSACTIONAL_CAUSAL_CONSISTENCY` | `checker.elle.Elle` |
-
-新增 checker 时不能只写类：还要提供无歧义的 `NAME`、`Properties` 构造函数、隔离映射、输出与 profile 行为，以及正反向测试。
-
-### 3.3 模块责任与代码锚点
-
-| 模块 | 已实现责任 | 后续修改先读 |
+| 位置 | 当前职责 | 修改时先看 |
 | --- | --- | --- |
-| 历史模型 | `History → Session → Transaction → Operation`；Lombok 生成主要访问器 | `history/History.java`、`Session.java`、`Transaction.java`、`Operation.java` |
-| 历史加载 | `text` 解析五元组；`elle` 解析 list-append 语义 | `history/loader/`、`util/HistoryLoaderFactory.java` |
-| 历史输出 | 文本输出；Elle、Elle 文本和 Viper 格式由 checker 路径使用 | `history/serializer/`；通用工厂目前只开放 `text` |
-| 负载生成 | uniform、zipf、hotspot 键分布与 Bernoulli 读写比例 | `generator/general/GeneralGenerator.java` |
-| 数据采集 | JDBC 建表、并发执行、事务重试、实际读值回填 | `collector/Collector.java`、`DBClient.java` 及数据库子包 |
-| C4 | 已知图、实时顺序与 TAP 判定；含 Elle list 变体 | `checker/C4/C4.java`、`C4List.java`、`graph/` |
-| PolySI | `KnownGraph`、剪枝、约束构造、MonoSAT 求解 | `checker/PolySI/verifier/`、`graph/` |
-| VeriStrong | 通过 JNI 调用图编码与 MonoSAT | `checker/VeriStrong_SI/`、`VeriStrong_SER/` |
-| 外部 checker | Viper 调 Python，Elle 调独立 JAR，路径在 `third_party/` | `checker/Viper/Viper.java`、`checker/elle/Elle.java` |
-| 运行时指标 | 时间、内存、PID、阶段 CSV、结果目录打包 | `util/Profiler.java`、`Runtime*Recorder.java`、`RuntimeDataSerializer.java` |
+| `src/main/java/Main.java` | CLI、注册、生成/加载、验证、参数扫描、结果收尾 | `run()`、`runOneShot` |
+| `config/Config.java` | 实际配置键与默认路径 | `util/ConfigParser.java`、根目录配置 |
+| `history/` | History/Session/Transaction/Operation、loader、serializer | `HistoryLoaderFactory`、对应测试 |
+| `generator/general/` | RW-register 负载与键分布 | `GeneralGenerator.java` |
+| `collector/` | JDBC 执行、读值回填、重试与清理 | `Collector.java`、`DBClient.java`、数据库子包 |
+| `checker/C4/` | RC/RR/RA/TCC 图检查及 list 变体 | `C4.java`、`C4List.java` |
+| `checker/PolySI/` | SI 图与约束检查 | `verifier/`、`graph/` |
+| `checker/VeriStrong_{SI,SER}/` | 通过 JNI/MonoSAT 检查 SI/SER | 对应 `SMTChecker*` |
+| `checker/{Viper,elle}/` | 外部进程 checker 适配 | 进程参数、PID 注册、输出解析 |
+| `util/` | 配置映射、profile、运行时记录、结果打包 | `Profiler`、`Runtime*Recorder`、`RuntimeDataSerializer` |
+| `backend/main.py` | 队列、进程、存储、API 与 DOT 解析 | 端点及其前端消费者 |
+| `frontend/src/` | 配置、运行、bug、图与请求封装 | `api/api.js`、`components/` |
+| `src/test/java/` | SI/SER 算法、主流程、Elle 适配、结果归档与历史 round-trip | `TestSIVerifier`、`TestSERVerifier`、`MainTest`、`ElleTest`、`RuntimeDataSerializerTest`、`HistoryLoaderSerializerTest` |
+| `backend/test_main.py` | 后端存储、失败记录、DOT 与下载的隔离回归 | 使用临时目录，禁止真实 worker 启动 |
+| `examples/histories/` | SI、SER、TCC 原始历史样例 | 对应预期结论需另行核验 |
+| `scripts/standalone/` | MySQL、PostgreSQL 本地 Compose | 对应 compose 文件 |
+| `third_party/` | Viper、MonoSAT、Elle CLI 等资产 | 不手改 |
 
-collector 注册名以源码为准：`MYSQL`、`POSTGRES`、`POSTGRES-SAVE`、`H2`、`MARIA`。其中 `POSTGRES` 对应 `collector.postgresql_reproduce`，普通 `collector.postgresql` 使用 `POSTGRES-SAVE`，不要按目录名猜配置值。
+### 1.3 Java 主流程
 
-## 4. FastAPI 与 Vue 的真实契约
+1. `Main.run()` 先扫描 `collector` 并校验 `db.type`，未知类型会在 checker 扫描和原生库初始化前失败；实现类以静态 `NAME` 注册，并需要 `Properties` 构造函数。
+2. `workload.skipgeneration=false` 时由 `GeneralGenerator` 生成历史，再由 collector 执行并回填实际读值；为 `true` 时按 `history.type` 加载 `history.path`。类型按值且忽略大小写解析，路径保留原始大小写。
+3. 一个历史可依次运行多个 checker。返回 `false` 时写入 `current/bug_N/`；text 历史保存为 `bug_hist.txt`，Elle 历史保存为 `bug_hist.edn`。checker 未实现 DOT 输出时保留历史并继续收尾，不伪造 `conflict.dot`。
+4. `workload.variable` 支持单维批量扫描；每次覆盖一个 `workload.*` 值。
+5. `RuntimeDataSerializer` 将配置、日志、profile 和 bug 等写入 `output.path`，默认 `./result`；归档配置使用副本并移除 `db.password`，文件移动失败会向上传播，不再生成看似完整的成功结果。
 
-### 4.1 后端不是 Java 库封装
+CLI `main()` 仅在退出码为 0 时清理 `./current`，失败时保留现场供后端归档和排障。Web 运行期间依赖该目录展示实时状态，不要在同一工作目录并行启动另一个 CLI。
 
-`backend/main.py` 的关键事实：
+### 1.4 FastAPI 与 Vue 契约
 
-- `dbtest_path = DBTest-1.0-SNAPSHOT-shaded.jar`，所以本地启动前必须把 shaded JAR 放到后端进程工作目录；按现有文档约定从仓库根目录启动。
-- `/run` 只把配置放入 `run_queue`；单个后台 `run_worker` 线程顺序消费。
-- worker 写入固定的 `config.properties`，用 `subprocess.Popen(["java", "-jar", ...])` 启动 Java，并等待进程结束。
-- `BugStore` 与 `RunStore` 启动时扫描 `result/`；运行中的实时数据来自 `current/`。
-- `/stop` 使用全局停止事件，并尝试清理 `current/`。它不是多租户、多并发任务系统。
-- 历史上传入口为 `/upload/`；前端通过 multipart 表单上传，不是 JSON。
+- 后端从工作目录读取 `DBTest-1.0-SNAPSHOT-shaded.jar`，因此按仓库约定从根目录启动。
+- `/run` 只入队，单个 worker 顺序执行；worker 写固定 `config.properties`，所有运行共享 `current/`。
+- Java 启动异常和非零退出会写入 `result/run_<uuid>/metadata.json`，状态为 `Failed` 并保留 `error`；用户停止记为 `Stopped`。`/stop` 在无活动进程时返回 409，进程清理由 worker 收尾。
+- `RunStore`、`BugStore` 每次扫描都重建计数与索引，损坏或字段不全的 metadata 会记录并跳过；实时信息来自 `current/`。共享目录意味着 `/stop` 仍不是多租户任务隔离机制。
+- `/view/{bug_id}` 使用 pydot 解析 DOT，返回 nodes/edges JSON；缺失图、缺失 `relate_to` 等可选属性或解析失败会降级为空图和说明。`BugView.vue` 消费 JSON 并由 G6 绘图，修改 DOT 属性时仍须同时检查这两处。
+- bug/run 下载按请求创建独立临时 ZIP；前端分别使用 `bug-<id>.zip`、`run-<id>.zip` 文件名。配置写入 localStorage 以及成功/失败结果归档前都会移除 `db.password`，实际运行仍使用当次输入的口令；运行列表区分 `Failed` 与 `Stopped`。
+- HTTP 请求主要集中在 `frontend/src/api/api.js`；文件上传使用 multipart。后端地址来自 `VITE_BACKEND_URL`，当前 `frontend/.env` 指向 `http://127.0.0.1:8000/`。
 
-主要 API 分组：
+## 2. 配置与运行
 
-| 分组 | 端点 |
+### 2.1 配置键
+
+| 分组 | 当前键 |
 | --- | --- |
-| 运行 | `POST /run`、`PUT /stop`、`GET /run_list`、`GET /current_run_id` |
-| bug | `GET /bug_list`、`GET /view/{bug_id}`、`POST /bug/tag`、`GET /download/{bug_id}` |
-| 运行结果 | `GET /run_profile/{run_id}`、`GET /runtime_info/{run_id}`、`GET /runtime_stage/{run_id}`、`GET /download_run/{run_id}` |
-| 实时状态 | `GET /current_log`、`GET /current_profile`、`GET /current_runtime_info`、`GET /current_runtime_stage` |
-| 其他 | `GET /history_count`、`GET /bug_count`、`POST /upload/` |
+| 数据库 | `db.url`、`db.username`、`db.password`、`db.type`、`db.isolation` |
+| 负载 | `workload.type`、`workload.skipgeneration`、`workload.history/session/transaction/operation`、`workload.readproportion/key/distribution`、`workload.variable` |
+| 已有历史 | `history.path`、`history.type`（`text` 或 `elle`） |
+| checker | `checker.isolation`，支持单个值或列表字符串 |
+| 输出与性能 | `profiler.enable`、`output.path` |
 
-### 4.2 前端定位
+Collector 注册名为 `MYSQL`、`POSTGRES`、`POSTGRES-SAVE`、`H2`、`MARIA`。其中 `POSTGRES` 指向 `collector.postgresql_reproduce`，普通 `collector.postgresql` 使用 `POSTGRES-SAVE`，不要按目录名猜配置。
 
-- `Configuration.vue`：构造数据库、负载、checker、profiler 配置并启动运行。
-- `RunList.vue` / `RunView.vue`：运行列表、日志、进度、ECharts 性能图、运行包下载。
-- `BugList.vue`：bug 列表与标签。
-- `BugView.vue`：请求 DOT 文本，在前端解析节点和边，再用 AntV G6 绘图。
-- `api/api.js`：除文件上传外，HTTP 路径统一在这里维护。
-- `utils/request.js`：Axios 实例，后端地址来自 `VITE_BACKEND_URL`，默认 `http://127.0.0.1:8000/`。
+`checker.isolation` 当前映射：
 
-修改 API 时同时检查以上消费者；修改 DOT 格式时还要检查 `/view/{bug_id}` 和 `BugView.vue` 的文本解析，不要只验证 Java 输出文件已经生成。
+| 配置值 | 实现 |
+| --- | --- |
+| `READ_COMMITTED` / `REPEATABLE_READ` / `READ_ATOMICITY` / `TRANSACTIONAL_CAUSAL_CONSISTENCY` | `C4` |
+| `SNAPSHOT_ISOLATION` | `PolySI` |
+| `SERIALIZABLE` | `SMT_SER` |
+| `VIPER_SNAPSHOT_ISOLATION` | `Viper` |
+| `POLYSI+_SNAPSHOT_ISOLATION` | `SMT_SI` |
+| `ELLE_TRANSACTIONAL_CAUSAL_CONSISTENCY` | `ELLE_TCC`；内部枚举为 `SNAPSHOT_ISOLATION`，但 Elle 命令实际使用 `causal-cerone`，见当前风险 |
 
-## 5. 测试、构建与运行
+### 2.2 环境与常用命令
 
-### 5.1 环境前提
-
-- Java：**JDK 11**。`pom.xml` 的 source/target 都是 11，Lombok 为 1.18.26。
-- Node：Docker 使用 20.10.0；前端锁文件已纳入版本控制。
-- Python：安装 `backend/requirements.txt`；Viper 另有自身依赖。
-- 完整算法测试与发布：优先 Linux。MonoSAT、VeriStrong、Viper、Elle 和数据库具有额外原生或外部依赖。
-- 所有相对路径都以仓库根目录为基准；不要从 `backend/` 内随意启动后仍假设路径不变。
-
-### 5.2 命令分层
+- Java 使用 **JDK 11**；前端以 Docker 中的 Node 20.10.0 为基准；Python 使用 **3.10** 并安装 `backend/requirements.txt`，与 CI 基线一致。
+- 所有相对路径以仓库根目录为基准。MonoSAT、Viper、Elle、VeriStrong 和数据库有额外依赖，完整验证优先 Linux/容器。
 
 ```bash
-# Java 编译与打包，不运行测试
+# Java：JDK 11
 mvn -B -DskipTests package
-
-# 秒级、无数据库的局部回归
-mvn -B -Dtest=HistoryLoaderSerializerTest test
-
-# 单个算法用例示例
-mvn -B -Dtest=TestSIVerifier#readCommitted test
-
-# 全量 Java 测试；需要匹配的原生环境
+mvn -B -Dtest=MainTest,HistoryLoaderSerializerTest,ElleTest,RuntimeDataSerializerTest test
 mvn -B clean test
 
-# 后端语法检查
+# 后端语法与隔离回归
 python -m compileall -q backend
+python -m unittest backend.test_main
 
-# 前端，先进入 frontend/
+# 前端：在 frontend/ 下执行
 npm ci
 npm run build
 
@@ -213,119 +114,49 @@ npm run build
 docker build --no-cache -t isovista .
 ```
 
-Java 当前有 33 个 `@Test`：SI 16、SER 16、文本历史 round-trip 1。`TestLoader.java` 只有加载辅助方法，没有被自动执行的测试注解。后端和前端目前没有自动化测试目录。
+本地 Web 顺序：
 
-本地 Web 运行的前置条件与顺序：
+1. 在 JDK 11 下打包，并将 `target/DBTest-1.0-SNAPSHOT-shaded.jar` 复制到仓库根目录。
+2. 从根目录运行 `python backend/main.py`。
+3. 在 `frontend/` 运行 `npm ci` 和 `npm run dev`。
+4. 使用专用测试数据库；现有 collector 会创建并清理 `dbtest`，不要指向有数据的业务库。
 
-1. 在 JDK 11 下执行 `mvn -DskipTests package`。
-2. 将 `target/DBTest-1.0-SNAPSHOT-shaded.jar` 复制到仓库根目录。
-3. 从根目录执行 `python backend/main.py`。
-4. 在 `frontend/` 执行 `npm ci && npm run dev`。
+### 2.3 已记录验证状态
 
-### 5.3 本次实际验证记录
+| 项目 | 当前记录 |
+| --- | --- |
+| 后端语法与回归 | 2026-11-21：`compileall` 通过；`backend.test_main` 12 项通过 |
+| 前端生产构建 | 2026-11-21：`npm ci` 与 Vite build 通过；已清理 CSS 注释警告，仍有既有大 chunk 警告 |
+| Java 定向回归、打包与 CLI | 2026-11-21：Linux JDK 11.0.33 下 10 项定向测试通过，shaded JAR 打包通过；未知数据库按预期非零退出，不再先触发 native 错误，失败时保留 `current/` |
+| Java 全量测试 | 已实际执行 `mvn -B clean test`，但验证环境缺少 `libmonosat.so`，23 个 SI/SER solver 用例以 `UnsatisfiedLinkError` 阻断；不得记为全量通过 |
+| Docker、数据库、真实外部 checker、真实 Web 端到端 | 当前记录为未验证；Elle 单元测试不代替真实 elle-cli 验证 |
 
-| 检查 | 结果 | 说明 |
+## 3. 当前风险
+
+### P0：先补齐可信基线
+
+- JDK 11 定向回归和打包已建立记录；仍需在具备 MonoSAT 原生库的环境重跑全量 SI/SER 测试，不要把 JDK 25 的 Lombok 生成成员缺失或 native 环境缺失误报为业务断言失败。
+- `ConfigParser` 将 Elle TCC 配置映射到 `SNAPSHOT_ISOLATION` 枚举，与 TCC 名称不一致；Elle 命令实际使用 `causal-cerone`。需用 TCC 样例确认配置、日志与结果口径后修正，不能只改显示名称。
+
+### P1：影响实验与维护
+
+- 后端运行共享固定配置和 `current/`，并行运行会互相污染；并发扩展前必须先隔离工作目录。
+- 后端已有 12 项隔离单元回归，但仍缺真实 Web 端到端和前端组件自动化；构建成功不等于实验闭环成功。
+- DOT 缺文件、缺可选属性和解析失败已有空图降级，复杂图的正确性仍需端到端核验；`Elle.outputDotFile()` 当前未实现，只能保证历史归档，不能宣称具备可视化闭环。
+- 当前 artifact 尚未统一记录代码版本、输入哈希、环境和全部非结论状态，论文对比前必须补齐。
+
+## 4. 执行路线
+
+完整任务、依赖和阶段验收只维护在 [11 · 单人实施路线图](docs/plans/11-roadmap.md)。
+
+| 顺序 | 目标 | 专题文档 |
 | --- | --- | --- |
-| `python -m compileall -q backend` | 通过 | 仅证明 Python 语法可编译，不代表 API 冒烟通过 |
-| 前端安装锁文件并 `npm run build` | 通过 | Vite 5.1.1；3214 个模块完成构建 |
-| 前端构建告警 | 待处理 | 两处 CSS 使用 `//` 注释；主 JS 约 3.50 MB，存在大包告警 |
-| `mvn -B -DskipTests package` | 当前环境失败 | 本机只有 JDK 25；Lombok 1.18.26 未生成 `log`、getter、constructor 等成员，导致编译失败 |
-| Java 单元测试 | 未执行成功 | 受同一 JDK/Lombok 基线问题阻塞；需在 JDK 11 重跑 |
-| Docker 构建 | 未执行 | 当前环境没有 Docker CLI |
-| 数据库、Viper、Elle、真实 Web 端到端 | 未执行 | 本次是结构与文档整理，不伪报外部依赖验证通过 |
+| 阶段 0 | JDK 11 基线、已知问题回归、CLI/Web 冒烟 | 本文当前风险 |
+| 阶段 1 | 回归历史、统一 checker 结果与 run manifest | 02、06、10 |
+| 阶段 2 | 参数矩阵、公平性能对比、可重建图表 | 03、09、10 |
+| 阶段 3 | 图数据契约、异常解释与演示闭环 | 08 |
+| 阶段 4 | 论文、干净环境复现与答辩交付 | 11 |
 
-## 6. 当前风险与先做事项
+**当前只从阶段 0 开始。** SQL IR、完整插件框架、reducer、历史合成和大规模数据库扩展均不阻塞主线。
 
-### P0：先恢复可重复基线
-
-1. 用 JDK 11 跑通编译、局部测试和全量测试，记录真实失败清单。当前 JDK 25 失败是工具链不兼容，不应通过大规模改业务代码解决。
-2. 在干净 Linux 环境验证 `mvn clean test` 与 Docker build；CI 配置存在不等于最近通过。
-3. 用一个已知文本历史完成 CLI 冒烟，再完成一次 FastAPI 队列运行，确认 JAR、配置、`current/`、`result/` 的相对路径完全一致。
-
-### P1：会直接影响实验可信度的问题
-
-- `Main.java:131` 对 `history.path` 整体调用 `toLowerCase()`，会破坏大小写敏感路径；只应对格式或枚举做大小写归一化。
-- `Main.java:168` 用 `==` 比较历史类型字符串，可能导致失败历史没有按预期序列化；应使用值比较并补回归测试。
-- 根目录 `config.properties` 仍有外部机器绝对路径和本地数据库口令示例。后续应提供无个人路径的示例配置，同时保持实际本地覆盖文件不进版本库。
-- 后端所有运行共享固定的配置与 `current/` 路径；队列、停止、重启恢复和重复运行需要明确状态契约后再扩展并发。
-- SI/SER 测试依赖 MonoSAT；后端与前端没有自动化测试，不能直接以「构建成功」替代「实验闭环成功」。
-
-### P2：可维护性与体验
-
-- `backend/main.py` 566 行，存储、进程、文件解析和 API 混在一处；有测试后再按边界拆分，不做无保护的大规模重写。
-- DOT 在前端靠文本解析，后续适合由后端输出经过 schema 验证的图数据，同时保留原始 DOT 下载。
-- 修复 CSS 注释，并在功能稳定后做路由级懒加载和依赖拆包。
-- `docs/plans/` 中的目录、协议和性能预算是目标设计，实施时要回写实际字段与实际测量结果。
-
-## 7. 推荐毕设边界
-
-### 必做主线
-
-- 多 checker 统一配置与运行。
-- 可维护的回归历史集，每个样例有预期结论、语义标签和来源。
-- 可重复实验矩阵：checker × isolation × workload × database。
-- 每次运行保存配置、代码版本、依赖版本、原始日志、结构化结果与环境信息。
-- 统一性能与正确性对比，图表能从原始结果重新生成。
-- 一个可演示的 Web 闭环和一份干净环境复现说明。
-
-### 有主线后再选做
-
-- history synthesizer、feedback workload generator：适合增强「发现更多 bug」的论点。
-- bug reducer：适合增强「定位与解释」的论点，但不同 checker 的反馈语义必须先统一。
-- 新数据库或新 checker：只有在能形成明确对照实验时增加，不用数量代替深度。
-
-## 8. 分阶段执行路线
-
-### 阶段 0：可重复工程基线
-
-- 固定 JDK 11、Node 20 与 Python 环境说明。
-- 完成第 6 节 P0，建立首次可信的构建与测试记录。
-- 将当前 `config.properties` 的示例路径、口令和输出目录整理为可复现约定。
-- 为第 6 节两个路径／字符串问题各补一个失败后再通过的测试。
-
-**验收**：干净检出后能按 README 完成 Java 构建、局部测试、前端构建和一次文本历史 CLI 检查；结果目录可定位且不含个人机器路径。
-
-### 阶段 1：回归历史与统一实验记录
-
-- 按 `docs/plans/02-benchmark-suite.md` 建 `regression/` 与 manifest；现有 `examples/histories/` 作为原始样例来源，不直接冒充完整回归集。
-- 给每个历史记录预期 accept/reject、异常语义、checker 适用性和最小复现说明。
-- 定义 run manifest：run id、seed、配置、Git revision、环境、起止时间、checker 结论与产物路径。
-- 补后端 API 冒烟和至少一个端到端样例。
-
-**验收**：同一命令重复运行同一回归集，结论一致，产物可追踪到代码版本和配置；失败不会被记成 accept 或 reject。
-
-### 阶段 2：实验矩阵与论文图表
-
-- 按 `09`、`10` 文档实现 checker × workload × isolation 矩阵，原始结果采用稳定 schema。
-- 分离正确性、异常分类、延迟、吞吐、内存与 checker 开销；不重复执行同一条件的不同指标。
-- 图表脚本只读取原始结果，可一键重建论文表格和图。
-- 在相同硬件、采样条件和负载下做对比，同时报告绝对值与相对差异。
-
-**验收**：论文中的每个核心数字都能回链到原始文件和生成命令；换一台机器能得到同趋势且过程可审计。
-
-### 阶段 3：展示与解释增强
-
-- 统一 bug、run、profile 与图数据契约，减少前端文本猜测。
-- 完善冲突图、关键事务定位和运行状态；补 reducer 或 synthesizer 时严格限制在选定主线内。
-
-**验收**：演示者能从配置运行走到异常解释，原始历史、图、配置和日志均可下载；新增结论有回归测试。
-
-### 阶段 4：论文与答辩交付
-
-- 论文实验章节引用阶段 2 的可重建结果。
-- 准备系统架构图、核心算法流程、对照实验、失效案例和局限说明。
-- 保留一份干净环境复现手册、演示数据和预构建产物。
-
-**验收**：另一位同学只按仓库文档即可复现核心实验和演示，不需要原作者口头补充路径或环境细节。
-
-## 9. 下一张具体任务单
-
-**题目：在 JDK 11 下建立可信基线并修复历史路径处理。**
-
-1. 执行 `mvn -B clean test`，保存通过数、失败数和首个根因。
-2. 执行 `mvn -B -Dtest=HistoryLoaderSerializerTest test`，建立秒级回归入口。
-3. 为 `history.path.toLowerCase()` 和历史类型 `==` 比较各写一个最小复现。
-4. 只修复这两处及对应测试，不顺带升级 Java、Lombok、算法或 Web 架构。
-5. 再跑局部测试、全量测试、前端构建和一次 CLI 冒烟；把结果回填到本文件第 5.3 节。
-
-完成这张任务单后，再进入阶段 1，不要从全部 11 份规划同时开工。
+修改目录、入口、配置键、API、结果字段或测试命令后，同步更新本文及直接消费者；阶段性流水账和长期设计细节不要写入本文件。

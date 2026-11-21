@@ -1,113 +1,99 @@
 # 01 · 愿景与总体架构
 
-## 1. 愿景
+## 1. 目标与边界
 
-**IsoVista 要成为隔离级别（Isolation Levels）黑盒测试的统一平台**，覆盖全流程与工具链：
+IsoVista 的长期目标是成为数据库隔离级别黑盒测试平台，让负载、执行历史、checker、实验结果和异常解释能够复用。
 
+当前毕设不追求一次性完成完整生态，而是先形成一条可信主线：
+
+> **同一历史可由多个 checker 验证，实验可重复，结果可追踪，异常可解释，论文图表可重新生成。**
+
+### 主线范围
+
+- 复用现有 Java CLI、collector、checker、FastAPI 队列和 Vue 展示。
+- 建立带来源和预期结论的回归历史集。
+- 统一 checker 结果、运行 manifest、性能指标和实验产物。
+- 支持参数扫描、批量运行、图表重建和 Web 演示。
+
+### 后续扩展
+
+- SQL 谓词与范围读、新数据库、新 checker。
+- 定向负载、历史合成、bug 归约和更丰富的解释视图。
+- 在线检查、白盒加速和公开数据集。
+
+### 非目标
+
+- 不做通用 SQL 正确性测试或数据库性能跑分平台。
+- 不承诺覆盖 SQL 全语义，也不在缺少观测数据时推断谓词依赖。
+- 不以接入数量、代码规模或未经实测的指标作为完成标准。
+
+## 2. 设计原则
+
+1. **黑盒优先**：默认只使用客户端可观测历史；白盒信息必须显式标注，不能与黑盒结果混用。
+2. **契约先于重构**：先固定历史、结果和 artifact schema，再逐步替换内部实现，避免推倒重写。
+3. **同输入、同口径**：所有比较共享历史、预算、环境和指标定义；不兼容的语义不强行排名。
+4. **失败也是结果**：`timeout`、`oom`、`error` 与 `accept/reject` 分开记录，不能转成通过或失败结论。
+5. **单机可复现**：先保证串行运行和干净环境复现，再考虑并行调度与分布式执行。
+
+## 3. 目标数据流
+
+```text
+Experiment YAML
+      │
+      ▼
+Benchmark / Workload ──▶ Executor + Logger ──▶ History / Trace
+      │                                            │
+      │                                            ▼
+      │                                      Checker adapters
+      │                                            │
+      │                                            ▼
+      │                                Verdict + Counterexample + Profile
+      │                                            │
+      ▼                                            ▼
+Run manifest + Artifact store ───────────▶ Analysis + Visualization
+
+可选支路：History transforms / Reducer / Synthesizer
 ```
-┌──────────┐   ┌──────────────┐   ┌────────────┐   ┌──────────────┐
-│ Benchmarks│ → │ Workload Gen │ → │  Executor  │ → │    Logger    │
-│ (KV/SQL)  │   │ (GT/DBStorm/ │   │ (12+ DBMS) │   │ (统一 trace) │
-└──────────┘   │  MT/Adaptive)│   └────────────┘   └──────┬───────┘
-               └──────────────┘                          │
-                                                         ▼
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌────────────┐
-│ Visualization│ ← │  Bug Reducer │ ← │   Checkers   │ ← │  History   │
-│ (图/SQL/时间)│   │ (归约+去重)  │   │ (10+ 家族)   │   │ Synthesizer│
-└──────────────┘   └──────────────┘   └──────────────┘   └────────────┘
-        │                                     │
-        ▼                                     ▼
-┌──────────────┐   ┌──────────────────────────────────────┐
-│ Perf. Analysis│ → │  Experiment Automation + Auto-Report │
-│ (分阶段/扩展性)│   │  (参数扫描/多图示/可复现)            │
-└──────────────┘   └──────────────────────────────────────┘
-```
 
-设计原则：
+主线中，历史可以直接来自已有文件，不必每次经过数据库执行。synthesizer 和 reducer 是独立支路，不能成为基本检查流程的前置依赖。
 
-1. **黑盒优先，白盒可选**：默认不改 DBMS、不依赖内部信息（Cobra/Viper/PolySI 路线）；对愿意暴露少量信息的数据库，提供可选的 version certificate / timestamp 白盒加速通道（Emme/Enne/CHRONOS 路线），两者结果可互相对照。
-2. **统一数据契约**：benchmark、generator、executor、logger、synthesizer、checker 之间只通过**统一 trace/历史 IR** 交互（见 05），任何环节可独立替换。
-3. **插件化**：benchmark / executor / checker / reducer 均为插件，按 NAME 注册（沿用现有 Reflections 机制），第三方工具以子进程或 JNI 方式接入。
-4. **可复现**：一切实验由声明式配置 + 随机种子驱动，产出物自包含（配置、历史、日志、原始数据、图表、报告）。
-5. **公平比较**：平台自身不偏向任何 checker；对比实验由统一协议强制执行（同输入、同预算、同环境，见 09）。
+## 4. 组件职责与现有落点
 
-## 2. 目标用户与典型场景
+| 组件 | 目标职责 | 现有落点 | 详细设计 |
+| --- | --- | --- | --- |
+| Experiment runner | 展开参数矩阵、调用现有 CLI、记录状态与产物 | `Main.java`、后端运行队列 | 10 |
+| Benchmark / regression | 描述历史来源、模型、参数和预期结论 | `examples/histories/`、生成参数 | 02 |
+| Workload generator | 从参数与 seed 生成可复现事务计划 | `generator/general/` | 03 |
+| Executor / logger | 执行计划并忠实记录观测，不解释隔离语义 | `collector/`、运行时记录器 | 04 |
+| History / transforms | 加载、校验、导出及可选结构变换 | `history/` | 05 |
+| Checker adapters | 统一能力、结果状态、反例与阶段数据 | `checker/`、`ConfigParser` | 06 |
+| Reducer | 在保持判定语义的前提下缩小历史 | 当前无实现 | 07 |
+| Visualization | 展示图、异常上下文和运行指标 | `BugView.vue`、`RunView.vue` | 08 |
+| Analysis | 从原始产物重建表格与图 | 现有 CSV、ECharts | 09、10 |
 
-| 用户 | 场景 | 平台价值 |
-|---|---|---|
-| DBMS 研发/测试团队 | 发布前验证隔离实现；bug 归约后提交工单 | Pisco 式归约产出可提交的最小复现；多 checker 交叉验证降低漏报 |
-| Checker 研究者 | 验证新算法；与 PolySI/Viper/Elle 等同台竞技 | 统一 API + apple-to-apple 协议 + 自动作图，省去搭采集/执行环境 |
-| 数据库用户/审计方 | 审计云数据库是否兑现隔离承诺 | 黑盒执行 + 多 checker 会诊；白盒接口可选加速 |
-| 应用开发者 | 验证应用在弱隔离下的健壮性 | MonkeyDB 式合成历史/mock storage 驱动应用测试 |
-| 教学 | 隔离级别语义与异常模式演示 | Isolde 式区分历史 + 可视化，直观展示 RC/RR/SI/SER 差异 |
+## 5. 契约边界
 
-## 3. 核心标准落地映射
+为避免每篇文档重复定义同一字段，按以下边界维护：
 
-| 标准 | 落地机制 | 负责文档 |
-|---|---|---|
-| C1 快速验证新算法 | Checker 插件 API（verify/report/profile 三方法）+ 参考模板 + 开发容器 | 06 |
-| C2 apple-to-apple | 统一对比协议：同历史文件、同 timeout、同机器画像、分阶段分解对齐 | 09 |
-| C3 benchmark 全面权威 | Benchmark 目录（manifest 描述数据模型/参数/权威来源）；KV 与 SQL Predicates 双轨 | 02 |
-| C4 数据库覆盖 | Executor 插件矩阵 + 能力声明（是否支持谓词/范围扫描/快照读取） | 04 |
-| C5 自动化脚本 | 实验配置 schema（YAML）+ CLI + 参数扫描 + 复现清单 | 10 |
-| C6 自动分析作图 | 分析管道：CSV/JSON → 图表规范 → 多图示 + Markdown/HTML 报告 | 10 |
+- **历史与负载输入**：由 02、03 定义；执行器只消费，不反向修改 benchmark 定义。
+- **执行观测**：由 04 定义；trace 保存事实，checker 输入所需的历史语义由加载或转换步骤确认。
+- **checker 结果**：由 06 定义；性能阶段名称由 09 约束。
+- **运行产物**：由 10 定义；manifest 引用历史、结果、日志和图表，不复制其内容。
+- **图数据**：由 08 定义；原始 DOT 继续作为可下载产物保留。
 
-## 4. 目标总体架构（逻辑视图）
+新增字段必须带 schema 版本，并检查 Java、FastAPI、Vue 和分析脚本的实际消费者。
 
-### 4.1 组件与职责
+## 6. 演进方式
 
-| 层 | 组件 | 职责 | 现有对应 |
-|---|---|---|---|
-| 接入层 | Web GUI / CLI / Python SDK | 配置实验、提交、监控、下载 | 现有 Configuration.vue + Main.java |
-| 编排层 | Experiment Orchestrator | 解析实验配置；调度 benchmark→gen→exec→check→reduce→analyze 流水线；任务队列与断点续跑 | 现有 main.py run_queue |
-| 数据层 | Trace Store / History IR | 统一 trace 与历史的存储、格式转换（text/elle/JSON）、版本管理 | 现有 history/ 包 |
-| 执行层 | Executor 插件群 | 在真实 DBMS 上执行负载并采集 | 现有 collector/ 包 |
-| 算法层 | Generator / Checker / Reducer 插件群 | 负载生成、隔离验证、bug 归约 | 现有 generator/ checker/ 包 |
-| 分析层 | Profiler / Analyzer / Reporter | 分阶段计时、内存/CPU 采样、统计检验、自动作图、报告生成 | 现有 util/Profiler 等 |
-| 展示层 | Visualization 服务 | 依赖图、SQL 视图、时间线、性能图表 | 现有 G6/ECharts 页面 |
+1. 先用适配器包住现有实现，保持旧配置和已有历史可用。
+2. 先迁移一个 checker、一个文本历史和一个小型实验矩阵，验证契约后再推广。
+3. 外部工具统一通过进程适配器接入，记录退出状态、子进程资源消耗和原始输出。
+4. SQL、在线检查和白盒能力只有在输入语义与观测来源完整时才加入，不为架构完整提前留空壳。
 
-### 4.2 关键数据流（目标态）
+## 7. 总体验收
 
-1. 实验配置声明 `benchmark + db + checker 列表 + 参数扫描 + 预算`；
-2. Orchestrator 实例化 Benchmark → Generator 产出负载 → Executor 在目标 DBMS 执行，Logger 落统一 trace；
-3. Synthesizer 将 trace 归一为历史 IR（含行级/谓词访问信息），按需做历史变换；
-4. 各 Checker 并行/串行验证同一历史，输出 verdict + counterexample（DOT/JSON）+ 分阶段 profile；
-5. Reducer 对每个 bug 做确定性复现 → 最小化 → 去重，产出 bug 记录（含标签）；
-6. Analyzer 汇总全部运行数据，Reporter 自动生成图表与报告；
-7. Visualization 提供交互式下钻（图/SQL/时间线联动）。
-
-### 4.3 与现有代码的衔接（不改基调，做扩展）
-
-- **保留**：`Main.java` 的 Reflections 插件注册、`Checker` 接口、`History/Session/Transaction/Operation` 模型、`config.properties` 配置风格、FastAPI 任务队列、G6/ECharts 前端。
-- **扩展**：
-  - `history/` 增加 `Trace`（带时间区间与访问行集）与 IR 转换层（05）；
-  - `checker/` 抽出 `CheckerPlugin` 统一骨架与上下文对象（06）；
-  - `collector/` 泛化为 `Executor` 接口（能力声明 + trace 输出）（04）；
-  - `util/` 增加 Analyzer/Reporter（10）；
-  - 新增 `benchmark/` 顶层包与 benchmark 目录（02）；
-  - 新增 `experiment/` 编排层与实验配置 schema（10）。
-
-## 5. 现状差距分析（GAP）
-
-> 现状结论来自对代码库的通读（详见 `../../ROADMAP.md`）；目标结论来自 refs/ 文献调研。
-
-| # | 维度 | 现状 | 目标 | 差距 | 优先级 |
-|---|---|---|---|---|---|
-| G1 | 数据模型 | 仅 read-write register（text）+ list-append（elle） | KV + SQL Predicates（行级/范围/谓词读、insert/delete/update） | 谓词异常（phantom read）无法表达；RR vs SER 无法区分（R13/R14/R15） | P1 |
-| G2 | Benchmark | 无 benchmark 抽象，负载参数内嵌在生成器 | 统一 benchmark 套件与目录 | 无权威负载、无可比性基线 | P1 |
-| G3 | Executor | 4 库（MySQL/PG/MariaDB/H2） | ≥12 库 | 云 NewSQL/NoSQL 缺失 | P1 |
-| G4 | Logger | Collector 顺带回填读值，无独立 trace | 统一 trace（时间区间+行集+SQL 文本） | 无法支撑 SQL 检查与在线检查 | P0 |
-| G5 | Checker 生态 | 6 家族（C4/PolySI/SMT_SI/SMT_SER/Viper/ELLE_TCC） | +Cobra/Elle 主线/Leopard/AWDIT/VeriStrong 完整版/Boomslang 插件/Emme 等 | 缺 SER 图检查代表、缺最优弱隔离测试器、缺统一 IR | P2 |
-| G6 | Synthesizer | 仅 Loader/Serializer | 区分历史合成 + 允许值枚举 + 历史变换 | 无法做规格比对与应用测试 | P2 |
-| G7 | Bug reducer | 无 | 复现+归约+去重 | 原始 case 过大无法提交工单（R11） | P2 |
-| G8 | 可视化 | 依赖图 + 曲线 | +SQL/表视图、时间线、交互 hook | SQL bug 无法直观呈现（R19） | P2 |
-| G9 | 自动化 | workload.variable 单维批处理 | YAML 实验配置 + 多维扫描 + 复现清单 | 实验管理靠手工 | P1 |
-| G10 | 自动分析 | 手写 CSV + 前端图表 | 分析管道 + 多图示 + 报告 | 出图出报告靠手工 | P1 |
-| G11 | 在线检查 | 无 | 持续历史在线验证（R18/R23） | 无法长时监控 | P3 |
-| G12 | 白盒接口 | 无 | version certificate / timestamp 接口（R13/R23） | 黑盒性能上限无法突破 | P3 |
-
-## 6. 非目标与边界
-
-- **不做**：数据库功能/性能测试（SQLancer、TPC 基准性能对比不属于本平台；benchmark 只取"隔离测试有效"的部分）。
-- **不做**：形式化验证工具链本身（平台集成而非重新实现定理证明）。
-- **不承诺**：SQL 全语义的 SMT 检查（R25 指出这是开放问题；平台以"插桩 + 行级依赖 + 部分历史（partial-observation）"路线落地，见 05/06）。
+- 现有历史在新旧链路中的 checker 判定一致；差异有明确原因和回归记录。
+- 任一实验可从 manifest 找回配置、代码版本、历史哈希、原始日志和结果。
+- 论文核心表格与图可以只依据 artifact 重新生成。
+- 演示可从上传历史或配置运行走到异常图，无需手工修改中间文件。
+- 可选模块未完成时，不影响上述主线独立交付。

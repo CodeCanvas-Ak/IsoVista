@@ -1,29 +1,44 @@
-# frontend
+# IsoVista Frontend
 
-This template should help get you started developing with Vue 3 in Vite.
+Vue 3 and Vite frontend for experiment configuration, run monitoring, bug lists, G6 counterexample graphs, and ECharts profiles.
 
-## Recommended IDE Setup
+## Prerequisites
 
-[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur) + [TypeScript Vue Plugin (Volar)](https://marketplace.visualstudio.com/items?itemName=Vue.vscode-typescript-vue-plugin).
+- Node.js 20 and npm (`Dockerfile` currently uses Node 20.10.0)
+- The FastAPI backend started from the repository root as described in [ROADMAP.md](../ROADMAP.md)
 
-## Customize configuration
+The backend URL is read from `VITE_BACKEND_URL`. The current `.env` uses:
 
-See [Vite Configuration Reference](https://vitejs.dev/config/).
-
-## Project Setup
-
-```sh
-npm install
+```dotenv
+VITE_BACKEND_URL=http://127.0.0.1:8000/
 ```
 
-### Compile and Hot-Reload for Development
+Use a URL reachable from the browser. Do not put database credentials in frontend environment files.
 
-```sh
+## Commands
+
+Run these commands from `frontend/`:
+
+```bash
+# Install the locked dependency versions
+npm ci
+
+# Start the Vite development server
 npm run dev
-```
 
-### Compile and Minify for Production
-
-```sh
+# Create a production build
 npm run build
+
+# Preview the production build locally
+npm run preview
 ```
+
+## Code map
+
+- `src/components/Configuration.vue`: database, workload, and checker configuration.
+- `src/components/RunList.vue` and `RunView.vue`: runs, logs, profiles, and downloads.
+- `src/components/BugList.vue` and `BugView.vue`: bug tags, graph rendering, expansion, and export.
+- `src/api/api.js`: backend endpoint wrappers.
+- `src/utils/request.js`: Axios instance and backend base URL.
+
+When changing an API or graph DTO, update the backend producer and all consuming components together. Run `npm run build` after frontend changes; a production build does not replace API or Web end-to-end smoke testing.

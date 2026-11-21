@@ -1,42 +1,42 @@
-# Quick Database Setup with Docker Compose
+# Standalone Test Databases
 
-This directory contains Docker Compose files to set up various databases for testing purposes quickly. Docker Compose simplifies the process of creating and managing multi-container Docker applications, making it easy to spin up databases with minimal configuration.
-
-## Table of Contents
-
-- [Supported Databases](#supported-databases)
-- [Prerequisites](#prerequisites)
-- [Usage](#usage)
-
-## Supported Databases
-
-Currently, the following databases are supported:
-
-1. [PostgreSQL](./postgres/docker-compose.yml)
-2. [MySQL](./mysql/docker-compose.yml)
+Docker Compose configurations for local MySQL and PostgreSQL testing. Use these services only as disposable development databases.
 
 ## Prerequisites
 
-Before you can use these Docker Compose files, ensure that you have the following prerequisites installed on your system:
+Install Docker with the Compose v2 plugin. Commands below use `docker compose`, not the legacy `docker-compose` binary.
 
-- [Docker](https://www.docker.com/)
-- [Docker Compose](https://docs.docker.com/compose/install/)
+## Start a database
 
-## Usage
+From this directory:
 
-1. Navigate to the specific database directory you want to use, e.g., `postgres`, `mysql`.
+```bash
+# MySQL
+docker compose -f mysql/docker-compose.yml up -d
 
-2. Start the database container by running the following command:
+# PostgreSQL
+docker compose -f postgres/docker-compose.yml up -d
+```
 
-   ```bash
-   docker-compose up -d
-   ```
+Default development connection settings:
 
-3. The database service should now be up and running. You can connect to it using the provided connection details or use it in your application as needed.
+| Service | JDBC URL | Database | User | Password |
+| --- | --- | --- | --- | --- |
+| MySQL | `jdbc:mysql://127.0.0.1:3306/` | `dbtest` | `dbtest` | `dbtest_pwd` |
+| PostgreSQL | `jdbc:postgresql://127.0.0.1:5432/` | `dbtest` | `dbtest` | `dbtest_pwd` |
 
-4. When you are done, you can stop and remove the containers by running:
+Select the collector name that matches the Java implementation; see the registration table in [ROADMAP.md](../../ROADMAP.md). IsoVista collectors may create, clear, or drop `dbtest` objects.
 
-   ```bash
-   docker-compose down
-   ```
+## Inspect and stop
 
+```bash
+# Follow logs
+docker compose -f mysql/docker-compose.yml logs -f
+docker compose -f postgres/docker-compose.yml logs -f
+
+# Stop and remove containers; named volumes remain
+docker compose -f mysql/docker-compose.yml down
+docker compose -f postgres/docker-compose.yml down
+```
+
+The Compose files currently use `latest` images and named volumes. Pin database versions for reproducible experiments, and reset persistent data explicitly when a clean initial state is required.

@@ -1,40 +1,41 @@
 # Use Cases
 
-Try IsoVista [here](http://43.129.197.141:8080).
+Start IsoVista locally by following the [root README](../README.md). Use your own dedicated test database and credentials; no public server or predeployed database is required for these examples.
 
-## Test database isolation levels
+## Analyze an existing SI history
 
-Enter the JDBC URL for the database connection along with some other parameters, then click `Start` to begin the test. 
+The repository includes [`examples/histories/dgraph_si.txt`](../examples/histories/dgraph_si.txt), a previously collected read-write register history containing an SI violation.
 
-We have pre-deployed three databases on our server that can be used for testing (username is 'root' and password is 'dbtest_pwd'):
+1. In **Workload Setting**, enable **Skip Generator** and select **Read-Write Registers (Text)**.
+2. Upload `dgraph_si.txt`.
+3. In **Checker Setting**, select **Snapshot Isolation (PolySI)** and start the run.
+4. Open the resulting bug from **Bug Table** and select **View**.
 
-- MySQL: jdbc:mysql://172.17.0.1:3306/
-- PostgreSQL: jdbc:postgresql://172.17.0.5:5432/
-- MariaDB: jdbc:mariadb://172.17.0.6:3306/
+![Collapsed Dgraph SI counterexample](images/dgraph_si_bug_collapsed.png)
 
-**Note that**:
+The counterexample contains WR, SO, and RW edges. WR and SO are known edges; the RW edge is derived. Colors and styles distinguish their roles in the displayed graph.
 
-1. The JDBC URLs provided here are local addresses, therefore, these three JDBC URLs can only be used in our deployment.
-2. Please set the database's isolation level (SQL-92 standard) higher than the checker's isolation level, otherwise there will be false positives.
+Right-click `RW(k378)` and choose **Expand** to inspect its derivation:
 
-## Visually analyse isolation bugs
+![Expanded Dgraph SI counterexample](images/dgraph_si_bug_expanded.png)
 
-In the [`examples/histories`](../examples/histories) directory, there are some pre-collected history files that can be analyzed by IsoVista. The file [`dgraph_si.txt`](../examples/histories/dgraph_si.txt) contains the history of SI bugs we previously collected on Dgraph. The following will demonstrate how to use IsoVista to analyze isolation bugs using this history as an example.
+The expanded graph includes the supporting WW and WR dependencies. The alternative WW direction is pruned because the existing SO and WR paths already determine the relevant order. Use the original history and downloaded DOT file when citing or further analyzing the result.
 
-In the Workload Setting, select `Skip Generator`, select `Read-Write Registers(Text)` and upload this file, and then in the Checker Setting, select `Snapshot Isolation (PolySI)` and click `Start`. After the checking is complete, you can view the bugs found in the `Bug Table`. Click the `View` button to see the counter example:
+## Compare SI checkers on the same history
 
-![dgraph_si_bug_collapsed](images/dgraph_si_bug_collapsed.png)
+1. Load the same history as above; do not regenerate a different workload for each checker.
+2. Select PolySI, Viper, and PolySI+ in **Checker Setting**.
+3. After the run, compare verdicts, total time, stage profiles, and runtime information.
 
-This bug manifests as a cycle. There are three types of edges in the cycle: WR, SO, and RW. Among them, WR and SO are known edges, while RW is a derived edge. IsoVista uses different colors to distinguish these edges.
+![Runtime information](images/runtime_info.png)
 
-Right-click on `RW(k378)` and then click `Expand` to reconstruct a comprehensive violating scenario to see how this edge is inferred:
+For a rigorous comparison, also record the history hash, timeout, memory limit, software versions, and machine environment. Different counterexample graphs do not necessarily imply different verdicts, and timeout or execution error must not be counted as accept or reject. The complete protocol is specified in [Performance Analysis](plans/09-performance-analysis.md).
 
-![dgraph_si_bug_expanded](images/dgraph_si_bug_expanded.png)
+## Execute a generated workload against a local database
 
-We can see that the graph expand from the original cycle to include some other edges and nodes. Form the expanded graph, We can infer that the `RW(k378)` edge from `Txn(id429)` to `Txn(id400)` is derived from the `WW(k378)` edge from `Txn(id234)` to `Txn(id400)` and the `WR(k378)` edge from `Txn(234)` to `Txn(id429)`; the other possibility of the WW dependency between `Txn(id400)` and `Txn(id234)`, depicted as a orange dashed arrow from `Txn(id400)` to `Txn(id234)` is pruned due to the presence of the SO and WR edges from `Txn(id234)` to `Txn(id400)`.
+1. Start a supported test database, for example with [the standalone Compose files](../scripts/standalone/README.md).
+2. Enter its JDBC URL, credentials, collector type, and database isolation level.
+3. Configure a small workload and one compatible checker, then start the run.
+4. Inspect logs and artifacts before increasing the workload size.
 
-## Benchmark isolation checkers
-
-Select `Snapshot Isolation(PolySI)`, `Snaphshot Isolation(Viper)` and `Snapshot Isolation(PolySI+)` in Checker Setting to benchmark the three SI checkers.
-
-![runtime_info](images/runtime_info.png)
+Record the database isolation level and checker specification separately; they are not interchangeable settings. Use only a disposable test database because collectors may create, clear, or drop `dbtest` objects.

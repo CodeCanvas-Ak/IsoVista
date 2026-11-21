@@ -1,116 +1,87 @@
 # IsoVista
 
-IsoVista is a black-box isolation checking system for databases that supports various isolation levels, ensures accurate and efficient bug detection, provides clear bug visualizations, and offers benchmarking for performance analysis. 
-It is designed to comprehensively test and verify the isolation guarantees of databases, helping developers to find and fix issues more effectively.
+IsoVista is a black-box database isolation checking system. It generates or loads transaction histories, executes workloads on supported databases, checks histories with multiple algorithms, and visualizes counterexamples and runtime profiles.
 
-View the [use cases](docs/use-cases.md) and try IsoVista [here](http://43.129.197.141:8080).
+## Current capabilities
+
+- Check read-write register and list-append histories with integrated C4, PolySI, VeriStrong, Viper, and Elle-based checkers.
+- Check configured RC, RR, RA, TCC, SI, and SER specifications, subject to each checker's model and assumptions.
+- Collect histories through JDBC collectors for MySQL, PostgreSQL, MariaDB, and H2.
+- Upload existing histories, inspect dependency graphs, and download bug artifacts.
+- Monitor runtime information and checker stage profiles through the Web UI.
+
+Feature support depends on the selected history model and external runtime. See [ROADMAP.md](ROADMAP.md) for exact registration names, current limitations, and verification status.
 
 ## Architecture
 
-![arch](docs/images/arch.png)
+![IsoVista architecture](docs/images/arch.png)
 
-## Development Guide
-
-- [ROADMAP.md](ROADMAP.md): verified codebase map, development workflow, current limitations, and thesis milestones.
-- [AGENTS.md](AGENTS.md): short routing and safety rules for coding agents.
-- [docs/plans/README.md](docs/plans/README.md): detailed target-state design proposals. These are plans, not implemented features.
-
-## Key Features
-
-- **Support for Multiple Isolation Levels**: IsoVista is capable of checking a wide spectrum of isolation levels, including read committed (RC), repeatable read (RR), read atomicity (RA), transactional causal consistency (TCC), snapshot isolation (SI) and serializability (SER). 
-
-- **Complete and Efficient Checking**: IsoVista is built upon sound and complete formal characterizations of all supported isolation levels, which ensures the absence of false positives and the detection of all pertinent bugs in DBMS execution histories. 
-IsoVista enhances checking performance through optimized SMT encoding for stronger isolation levels and efficient data structures for managing transactional dependency graphs in weaker levels.
-
-- **Informative Bug Visualization**: Upon detecting an isolation bug, IsoVista provides detailed visualizations of the bug scenario, including the core transactions involved and their dependencies. 
-This feature aids developers in understanding the nature of the bug and facilitates the debugging process.
-
-- **Benchmarking and Performance Profiling**: IsoVista includes tools for monitoring runtime information like CPU and memory utilization, and for profiling checking statistics such as time and memory usage across different workloads. 
-These capabilities help developers adjust their checking strategies and explore new optimizations for their tools.
-
-## Support
-
-### Databases
-
-- MySQL
-- PostgreSQL
-- MariaDB
-
-### Isolation Levels
-
-- Read Committed
-- Repeatable Read
-- Read Atomicity
-- Transactional Causal Consistency
-- Snapshot Isolation
-- Serializable
-
-### Models
-
-#### read-write register
-
-`r/w(key, value, session id, txn id)`
-
-Example of history:
-
-```
-w(1,0,0,0)
-w(2,0,0,0)
-w(1,1,1,1)
-r(2,0,1,2)
-```
-
-#### list-append
-
-Refer to [jepsen history](https://github.com/jepsen-io/history).
-
-Example of history:
-
-```
-{:index 1, :type :invoke, :process 0, :value [ [ :append 1 1 ] [ :append 2 1 ] ]}
-{:index 2, :type :ok, :process 0, :value [ [ :append 1 1 ] [ :append 2 1 ] ]}
-{:index 3, :type :invoke, :process 1, :value [ [ :r 1 nil ] ]}
-{:index 4, :type :ok, :process 1, :value [ [ :r 1 [1] ] ]}
-```
-
-## How to deploy
-
-### Docker
-
-Pull Docker image and deploy.
+## Quick start with Docker
 
 ```bash
 docker pull ghcr.io/hengxin/isovista:main
 docker run --name IsoVista -p 8080:8080 -p 8000:8000 --rm -d ghcr.io/hengxin/isovista:main
 ```
 
-Then, use the browser to access the address http://127.0.0.1:8080 to use.
+Open `http://127.0.0.1:8080`. The frontend uses `http://127.0.0.1:8000/` as its default backend address. These commands use the published upstream image; to run this exact checkout, build it with `docker build -t isovista .` and substitute `isovista` for the image name.
 
-The default backend address is http://127.0.0.1:8080/. If you want to run IsoVista on a server, you can modify the backend address by passing an environment variable when running Docker.
+For a remote deployment, set the backend URL visible to the browser:
 
 ```bash
-docker run --name IsoVista -e VITE_BACKEND_URL=http://<your_server_ip>:8000/ -p 8080:8080 -p 8000:8000 --rm -d ghcr.io/hengxin/isovista:main
+docker run --name IsoVista \
+  -e VITE_BACKEND_URL=http://<server-address>:8000/ \
+  -p 8080:8080 -p 8000:8000 --rm -d \
+  ghcr.io/hengxin/isovista:main
 ```
 
-Then, use the browser to access the address http://<your_server_ip>:8080 to use.
+Use a dedicated test database. Existing collectors create and remove the `dbtest` database or its tables.
 
-### Build on your own(not recommended)
+## Local development
 
-Refer to the [Dockerfile](Dockerfile).
+Prerequisites:
 
-## How to extend IsoVista
+- JDK 11 for Java builds and tests
+- Node.js 20 and npm for the frontend
+- Python 3.10 with `backend/requirements.txt` (the CI baseline)
+- Additional native or external dependencies for MonoSAT, VeriStrong, Viper, Elle, and database integration tests
 
-- [How to check a new database](docs/how-to-check-a-new-database.md)
-- [How to implement a new checker](docs/how-to-implement-a-new-checker.md)
+The verified commands, startup order, configuration keys, and current environment constraints are maintained in [ROADMAP.md](ROADMAP.md). Frontend-specific commands are in [frontend/README.md](frontend/README.md). Local MySQL and PostgreSQL Compose files are documented in [scripts/standalone/README.md](scripts/standalone/README.md).
+
+## History input
+
+### Read-write register
+
+Text operations use `r/w(key, value, session id, txn id)`:
+
+```text
+w(1,0,0,0)
+w(2,0,0,0)
+w(1,1,1,1)
+r(2,0,1,2)
+```
+
+### List-append
+
+IsoVista can load Jepsen/Elle-style list-append histories. See the [Jepsen history format](https://github.com/jepsen-io/history) and the existing examples under `examples/histories/`.
+
+## Usage and extension guides
+
+- [Contributing guide](CONTRIBUTING.md): development workflow, change expectations, and pull-request checklist.
+- [Use cases](docs/use-cases.md): analyze an existing SI history and compare SI checkers.
+- [How to check a new database](docs/how-to-check-a-new-database.md): current collector extension steps.
+- [How to implement a new checker](docs/how-to-implement-a-new-checker.md): current checker contract and registration.
+- [Target-state designs](docs/plans/README.md): proposed designs, not implemented features.
+- [Single-person implementation roadmap](docs/plans/11-roadmap.md): prioritized stages and acceptance criteria.
 
 ## Known limitations
 
-- IsoVista utilizes multiple network connections to transmit data between the frontend and backend. In cases of network congestion, delays may occur, causing charts or tables to be displayed slowly or not promptly.
-- If the workload parameter is set very high (e.g., #session=10000), it might exhaust system resources. Therefore, IsoVista has imposed limits on the size of some parameters.
+- The backend uses a serial queue and shared `config.properties` and `current/` paths; concurrent runs are not isolated.
+- Native libraries and external checkers require a compatible runtime. A successful frontend build does not prove that the full checking pipeline works.
+- Large workloads can exhaust local resources. Start with small histories and record timeout, OOM, and execution errors separately from semantic verdicts.
 
-## Related GitHub Repository
+## Related projects
 
 - [PolySI](https://github.com/amnore/PolySI)
 - [Viper](https://github.com/Khoury-srg/Viper)
-- [elle](https://github.com/jepsen-io/elle)
+- [Elle](https://github.com/jepsen-io/elle)
 - [elle-cli](https://github.com/ligurio/elle-cli)

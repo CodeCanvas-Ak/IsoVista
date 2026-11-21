@@ -1,114 +1,97 @@
-# 03 · Workload Generator 方案
+# 03 · Workload Generator
 
-## 1. 设计目标
+## 1. 目标与现状
 
-把"负载生成"从 IsoVista 现有的单一 `GeneralGenerator` 演进为**四类生成器 + 统一参数空间 + 完全可复现**的子系统：
+生成器负责产生**事务计划**：会话、事务、操作及其参数。真实交错由执行器形成，生成器不应伪装成数据库调度器。
 
-| 生成器 | 思路 | 文献依据 | 解决的问题 |
-|---|---|---|---|
-| **GT-Gen**（通用） | 随机事务负载（session×txn×ops，分布可控） | 现有 GeneralGenerator 泛化；R4/R6 用法 | 大规模压力测试、建立信心 |
-| **DBStorm-Gen** | 数据状态镜像 + 冲突图空间探索 + 异常植入 | R10（ISSTA'24） | 有效性（避免无效/冗余负载）、异常敏感（按 IL 定制） |
-| **MT-Gen** | Mini-Transaction（≤4 操作的 RMW 事务） | R22（ICDE'25） | 强隔离级别端到端效率（生成快、验证快） |
-| **Adaptive-Gen** | 反馈驱动（根据已发现异常/未覆盖冲突图调整） | R10 + R26 思路 | 覆盖率导向的持续测试 |
+当前 `GeneralGenerator` 已支持读写寄存器、uniform/zipf/hotspot 分布和基本规模参数。近期工作是把参数、随机种子和输出保存好，而不是同时实现多套复杂生成算法。
 
-四类生成器共享**同一 WorkloadSpec 输入与参数命名**（见 02），可混合编排（如同一实验中 GT 打底 + MT 补刀 + Adaptive 收尾）。
+## 2. 统一参数
 
-## 2. 统一参数空间（所有生成器）
+| 标准参数 | 当前 `workload.*` 键 | 含义 |
+| --- | --- | --- |
+| `histories` | `history` | 生成的历史数量 |
+| `sessions` | `session` | 会话数 |
+| `txns_per_session` | `transaction` | 每会话事务数 |
+| `ops_per_txn` | `operation` | 每事务操作数 |
+| `read_ratio` | `readproportion` | 读操作比例 |
+| `key_space` | `key` | 键空间 |
+| `distribution` | `distribution` | 键分布 |
+| `seed` | 当前无独立键，目标新增 | 随机序列根种子 |
+
+`workload.variable` 是批量扫描入口，归 10 的实验展开层处理，不属于生成算法。
+
+目标 `WorkloadSpec` 示例：
 
 ```yaml
-# workload spec（benchmark manifest params 的实例）
-sessions: 20                # 并发会话数
-txns_per_session: 100       # 每会话事务数
-ops_per_txn: 5              # 每事务操作数（MT-Gen 固定 ≤4）
-read_ratio: 0.5             # 读比例
-key_space: 1000             # 键空间/记录数
-distribution: uniform       # uniform | zipf | hotspot | custom
-zipf_theta: 1.0
-hotspot_fraction: 0.2
-duplicate_writes: true      # 是否允许重复写值（R6：现实负载普遍存在）
-txn_shape: random           # random | rmw | template:<name>
-abort_ratio: 0.0            # 注入 abort 的比例
-seed: 0                     # 全局种子（一切随机性的根）
-sql_predicate_ratio: 0.3    # SQL 模型：谓词读占比（02 的 sql benchmark）
-scan_range: 10              # 范围扫描宽度
+schema_version: 1
+benchmark: rw-register
+generator: general
+seed: 42
+params:
+  histories: 1
+  sessions: 4
+  txns_per_session: 10
+  ops_per_txn: 4
+  read_ratio: 0.5
+  key_space: 100
+  distribution: zipf
+  duplicate_writes: true
 ```
 
-可复现性约定：**实例 ID = hash(benchmark, params, seed)**；生成器内部一切随机（含交错调度模拟）均由 seed 决定的确定性 PRNG 产生。
+旧 properties 键通过映射继续可用；新字段只有在实现后再加入根目录配置说明。
 
-## 3. GT-Gen（通用生成器）
+## 3. 可复现约定
 
-**现状升级**：现有 `GeneralGenerator`（线程池并行生成、uniform/zipf/hotspot、写值按 key 自增）直接 benchmark 化（rw-register），并扩展：
+- 解析后的 `WorkloadSpec` 与事务计划一并保存，实例身份按 02 的规则计算。
+- 所有随机选择使用显式、可保存状态的 PRNG；禁止混用全局随机源和时间种子。
+- 相同 spec 在同一实现版本下应生成逐字节一致的计划；跨版本比较时同时记录生成器版本。
+- 数据分布用统计容差验证，不要求有限样本逐项等于理论比例。
+- 执行后的读值、成功事务集合和并发顺序不属于计划，因此不要求两次数据库执行完全相同。
 
-1. **事务模板支持**：除纯随机外，支持 smallbank/twitter/rubis 等模板化事务（`r(k1); w(k1,f(v)); r(k2)` DSL 实例化）；
-2. **abort 注入**：按比例把事务标记为 aborted（检验 AbortedRead/ThinAirRead 类异常，C4 的 RC TAP 集依赖此类历史）；
-3. **list-append 模型**：Elle 语义的 append 操作生成（版本序可高效推断）；
-4. **重复写值开关**：关闭时写值全局唯一（Elle/Viper 的 collector 假设）；开启时允许重复（VeriStrong 路线）；
-5. **SQL 实例化器**：同一参数空间生成参数化 SQL 事务计划（表、谓词、参数值），供 SQL Executor 执行。
+## 4. 分层实现
 
-## 4. DBStorm-Gen（有效负载生成）
+### A. 通用生成器：近期完成
 
-核心三件套（R10）：
+- 保留现有规模和分布能力，补 seed、解析后参数和计划序列化。
+- 明确写值唯一性或重复写值策略，并把该假设传给 checker。
+- 为边界参数、非法参数和空结果提供明确错误。
+- 只有实验需要时才加入 abort；aborted 历史与成功事务历史必须可区分。
 
-### 4.1 数据状态镜像（Data State Mirroring）
+### B. 模板生成器：按对照实验需要加入
 
-- **分布引导法**（fk/nk 属性）：以理论分布函数镜像属性值的存在性与体量，Δ-偏差有界（R10 定理 1：遵循 insert/delete/update 生成规则 R1–R3 后，经验分布与理论分布偏差 ≤ Δ 的概率 > 1−2e^{−2NrΔ²}）；
-- **分区法**（pk 属性）：静态键常驻 + 动态键内存维护（每键 ⟨L,λ⟩ 锁与存在位），保证"每个操作都能访问到预期记录"（访问率 α=1）；
-- 平台落地为独立组件 `DataMirror`：Generator 与 Executor 共享（执行前建镜像，执行中随写操作更新），使**谓词/范围操作也能命中预期行集**。
+用小型操作 DSL 描述 smallbank、读改写等固定形状，键和值仍由统一参数采样。模板应来源于 02 的 benchmark，不在 Java 中重复硬编码另一份定义。
 
-### 4.2 冲突图空间探索（Dissimilar Conflict Graphs）
+list-append 也作为独立模型处理，不能只改文件格式而保留读写寄存器语义。
 
-- history-independent 的相邻图生成（图编辑距离驱动），保证负载间冲突图不相似（R10）；
-- 平台落地为 `GraphSpaceExplorer`：维护已观测冲突图集合，新负载按"最大化图空间距离"采样；对 KV 模型用事务依赖图，对 SQL 模型用行级冲突图。
+### C. Mini-Transaction：可选优化
 
-### 4.3 异常植入（Anomaly Implantation）
+针对短小 RMW 事务建立形状库，用于降低验证成本或覆盖特定异常。其写值假设、操作上限和适用 checker 必须显式记录，并通过对照实验确认收益，不预设性能倍数。
 
-- 按目标 IL 的异常定义，构造 conflict path + pivot transaction（R10 §3④），把定向异常"种"进负载；
-- 平台落地为 `AnomalyInjector`：输入异常类型（lost-update/write-skew/phantom/fractured-read…）+ 目标 IL，输出带定向异常的负载；与 `anomaly-suite` benchmark（02）配合，实现"每个异常一个最小复现负载"。
+### D. DBStorm / Adaptive：后续研究项
 
-## 5. MT-Gen（Mini-Transactions）
+数据状态镜像、冲突图探索和反馈驱动生成属于独立增强。启动前必须已有：
 
-设计约束（R22）：
+1. 可复现基线生成器；
+2. 覆盖率或异常模式的明确度量；
+3. 固定预算下的随机基线；
+4. 10 的批量运行和结果收集能力。
 
-- 每事务 ≤4 个 r/w 操作，且遵循 **RMW 模式**（每个写前有同键读）；
-- 写值唯一（开启 MT 快速验证的前提；关闭则 NP-hard）；
-- 事务形状从 14 种文献记载异常模式反推（R22：MTs 可捕获全部 14 种异常）。
+## 5. 与执行器的边界
 
-平台落地：
+- 生成器输出计划，不直接决定真实数据库的提交顺序。
+- 定向异常若需要 barrier 或延迟注入，应在计划中声明协同点，由 04 的能力检查决定是否可执行。
+- 不支持协同的执行器只能按普通并发运行，并把定向场景标记为“未保证触发”，不能静默声称已复现。
+- 重试和 aborted attempt 是执行观测，不回写为原计划的随机选择。
 
-- `MTShapeLibrary`：枚举全部 ≤4 操作 RMW 形状（按读写键组合分类），每形状标注可触发的异常模式；
-- `MT-Gen` = 形状采样 + 键/值分配 + 会话编排；与 GT-Gen 共用分布与 seed 机制；
-- **效率收益**（R22 实测）：生成阶段减少阻塞与重试；验证阶段线性/近线性时间——端到端显著优于通用负载，尤其适合强隔离级别的大批量日常测试。
+## 6. 最小测试集
 
-## 6. Adaptive-Gen（自适应生成）
+- 同 spec 两次生成结果一致，不同 seed 能产生不同计划。
+- 会话、事务和操作数量符合约束，键与值满足声明的取值规则。
+- uniform/zipf/hotspot 在固定样本上满足统计 sanity check。
+- 重复写值、唯一写值和 list-append 的假设不会混淆。
+- 非法比例、空键空间和过度规模在消耗大量资源前被拒绝。
 
-闭环：`生成 → 执行 → 检查 → 反馈 → 再生成`。
+## 7. 验收
 
-- 反馈信号：已发现异常类型集合、未覆盖的冲突图区域、checker 阶段耗时（哪类负载验证慢）、执行中止率；
-- 策略：
-  - 覆盖率导向：向未覆盖冲突图区域倾斜采样（R10 图空间探索的在线版）；
-  - 难度导向：对验证耗时高的负载形状做参数扰动（帮助 checker 研究者做最坏情况分析）；
-  - 异常导向：对已发现异常做参数邻域采样（评估 bug 的触发面）；
-- 停止条件：预算耗尽（时间/历史数）或覆盖率收敛；
-- 该生成器依赖 10 的实验编排层驱动（每轮是一个完整 mini-experiment）。
-
-## 7. 调度与并发语义
-
-- Generator 产出的是**事务计划**（谁在哪个会话按什么顺序发什么操作），不直接决定真实交错；
-- 真实交错由 Executor 的并发执行自然产生（见 04）；对 KV 模型保留现有"线程池 + synchronized"的生成方式；
-- 对**定向异常**负载（DBStorm 植入/MT 形状），Executor 提供"协同执行原语"（barrier/延迟注入），保证定向冲突按计划形成（R10 的 pivot 协调思想）。
-
-## 8. 与现状衔接
-
-| 现有组件 | 处置 |
-|---|---|
-| `generator/general/GeneralGenerator` |  benchmark 化为 GT-Gen 的 rw-register 实例，保留线程池实现 |
-| `generator/general/{Bernoulli,HotspotInteger}Distribution` | 复用（分布采样组件） |
-| `generator/tpcc/TpccGenerator`（空壳） | 废弃或重定向到 `benchmarks/sql/tpcc` + SQL 实例化器 |
-| `config.properties` 的 workload.* | 映射为 WorkloadSpec 参数（保持向后兼容的键名） |
-
-## 9. 验收要点
-
-1. 同一 (benchmark, params, seed) 在两次运行产出逐字节相同的负载计划；
-2. DBStorm-Gen 在任一目标 DBMS 上访问率 α=1（每个操作都访问到记录），并有分布拟合度 β 报告；
-3. MT-Gen 负载在 SER/SI 下的端到端时间显著低于同等事务数的 GT 负载（复现 R22 的量级结论）；
-4. Adaptive-Gen 在固定预算下覆盖的异常模式数 ≥ 随机基线。
+近期只需满足：现有配置可迁移、计划可保存、seed 可复现、结果可被 04 和已有 loader/checker 消费。高级生成器必须分别提供“相对随机基线增加了什么”的实验证据，否则不进入默认流程。
