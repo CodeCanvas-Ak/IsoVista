@@ -7,6 +7,11 @@ RUN mvn -DskipTests package
 
 FROM ubuntu:22.04
 
+# Recorded in every run.json; pass the commit to make artifacts traceable:
+# docker build --build-arg ISOVISTA_COMMIT=$(git rev-parse HEAD) -t isovista .
+ARG ISOVISTA_COMMIT=unknown
+ENV ISOVISTA_COMMIT=${ISOVISTA_COMMIT}
+
 WORKDIR /app
 SHELL ["/bin/bash", "-c"]
 
@@ -15,7 +20,7 @@ COPY src/main/resources/lib* /lib/x86_64-linux-gnu/
 RUN ln -s /lib/x86_64-linux-gnu/libmonosat.so /lib/x86_64-linux-gnu/liblibmonosat.so
 
 RUN apt update
-RUN apt install -y python3 python3-pip curl openjdk-11-jdk libgmp-dev libboost-log-dev
+RUN apt install -y python3 python3-pip curl openjdk-11-jdk libgmp-dev libboost-log-dev graphviz
 
 # install Viper dependencies
 COPY third_party ./third_party

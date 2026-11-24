@@ -1,0 +1,17 @@
+schema_version: 1
+id: ser-valid-accept
+kind: regression
+model: kv-rw
+history: history.txt
+source:
+  type: handcrafted
+  reference: benchmarks/regression/ser-valid-accept/history.txt
+  description: Serial-order friendly history shared with the SI accept case
+anomalies: []
+assumptions: [complete-wr, unique-write-value]
+checks:
+  - checker: SMT_SER
+    isolation: SERIALIZABLE
+    verdict: accept
+    requires: [native-monosat]
+notes: Positive counterpart of ser-pg-reject.

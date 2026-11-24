@@ -14,6 +14,9 @@ export default defineConfig({
     }
   },
   build: {
+    // G6 4.x is a single ~1.5 MB runtime and ECharts needs its whole core; both are already
+    // split into their own chunk and only fetched by the route that renders them.
+    chunkSizeWarningLimit: 1600,
     rollupOptions: {
       output: {
         manualChunks(id) {

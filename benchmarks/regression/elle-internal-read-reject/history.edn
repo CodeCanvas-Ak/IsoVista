@@ -1,0 +1,2 @@
+{:index 1, :type :invoke, :process 0, :value [[ :append 1 1] [ :r 1 nil] ]}
+{:index 2, :type :ok, :process 0, :value [[ :append 1 1] [ :r 1 [ ]] ]}

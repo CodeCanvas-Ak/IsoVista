@@ -1,0 +1,24 @@
+schema_version: 1
+id: si-valid-accept
+kind: regression
+model: kv-rw
+history: history.txt
+source:
+  type: handcrafted
+  reference: benchmarks/regression/si-valid-accept/history.txt
+  description: Two sessions with write-read and write-write dependencies that admit a serial order
+anomalies: []
+assumptions: [complete-wr, unique-write-value]
+checks:
+  - checker: PolySI
+    isolation: SNAPSHOT_ISOLATION
+    verdict: accept
+  - checker: Viper
+    isolation: VIPER_SNAPSHOT_ISOLATION
+    verdict: accept
+    requires: [python3, viper]
+  - checker: SMT_SI
+    isolation: POLYSI+_SNAPSHOT_ISOLATION
+    verdict: accept
+    requires: [native-monosat]
+notes: Positive counterpart of si-dgraph-reject; every SI checker must accept it. Transaction ids start at 0 because the SMT solver indexes them directly.

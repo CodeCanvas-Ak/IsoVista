@@ -11,6 +11,7 @@ import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RuntimeDataSerializerTest {
@@ -83,5 +84,56 @@ class RuntimeDataSerializerTest {
         assertEquals("secret", runtimeConfig.getProperty(Config.DB_PASSWORD));
         assertEquals("test log", Files.readString(outputPath.resolve("output.log")));
         assertTrue(Files.exists(outputPath.resolve("metadata.json")));
+    }
+
+    @Test
+    void outputToPathWritesCheckerResultsAndRunManifest() throws IOException {
+        Path sourceDirectory = tempDir.resolve("current");
+        Path outputPath = tempDir.resolve("run_7");
+        Files.createDirectories(sourceDirectory);
+        Files.createDirectories(outputPath);
+        Files.writeString(sourceDirectory.resolve("output.log"), "test log");
+
+        Properties runtimeConfig = new Properties();
+        runtimeConfig.setProperty(Config.DB_TYPE, "MYSQL");
+        runtimeConfig.setProperty(Config.DB_ISOLATION, "SERIALIZABLE");
+        runtimeConfig.setProperty(Config.CHECKER_ISOLATION, "SNAPSHOT_ISOLATION");
+
+        checker.result.CheckerResult reject = checker.result.CheckerResult.skipped(
+                "PolySI", "SNAPSHOT_ISOLATION", "deadbeef", "not needed");
+        RunRecord record = new RunRecord();
+        record.setRunId("run_7");
+        record.setCodeRevision("abc123");
+        record.setHistorySha256("deadbeef");
+        record.setCheckerResults(java.util.List.of(reject));
+
+        new RuntimeDataSerializer(outputPath, 1L, "run_7")
+                .outputToPath(1, 0, runtimeConfig, false, sourceDirectory, java.util.List.of(reject), record);
+
+        String results = Files.readString(outputPath.resolve("results.yaml"));
+        assertTrue(results.contains("status: skipped"));
+        assertTrue(results.contains("history_sha256: deadbeef"));
+
+        String runJson = Files.readString(outputPath.resolve("run.json"));
+        assertTrue(runJson.contains("\"run_id\" : \"run_7\""));
+        assertTrue(runJson.contains("\"code_revision\" : \"abc123\""));
+        assertTrue(runJson.contains("\"history_sha256\" : \"deadbeef\""));
+        assertTrue(runJson.contains("output.log"));
+
+        String metadata = Files.readString(outputPath.resolve("metadata.json"));
+        assertTrue(metadata.contains("\"checker_results\""));
+        assertTrue(metadata.contains("\"run_id\":\"run_7\""));
+    }
+
+    @Test
+    void customRunIdReplacesTheTimestampDirectory() {
+        assertEquals("run_web_1", RuntimeDataSerializer.resolveRunDirectoryName("run_web_1", 42));
+        assertEquals("run_42", RuntimeDataSerializer.resolveRunDirectoryName(" ", 42));
+    }
+
+    @Test
+    void unsafeRunIdIsRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> RuntimeDataSerializer.resolveRunDirectoryName("../escape", 42));
     }
 }

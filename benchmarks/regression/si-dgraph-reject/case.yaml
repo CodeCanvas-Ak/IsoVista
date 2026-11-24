@@ -1,0 +1,24 @@
+schema_version: 1
+id: si-dgraph-reject
+kind: regression
+model: kv-rw
+history: history.txt
+source:
+  type: collected
+  reference: examples/histories/dgraph_si.txt
+  description: Dgraph snapshot isolation counterexample collected by the IsoVista authors
+anomalies: [snapshot-isolation-violation]
+assumptions: [complete-wr, unique-write-value]
+checks:
+  - checker: PolySI
+    isolation: SNAPSHOT_ISOLATION
+    verdict: reject
+  - checker: Viper
+    isolation: VIPER_SNAPSHOT_ISOLATION
+    verdict: reject
+    requires: [python3, viper]
+  - checker: SMT_SI
+    isolation: POLYSI+_SNAPSHOT_ISOLATION
+    verdict: reject
+    requires: [native-monosat]
+notes: The same history is rejected by every SI checker, which is the cross-checker agreement case.

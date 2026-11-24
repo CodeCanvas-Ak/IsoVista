@@ -99,7 +99,7 @@ class BackendMainTest(unittest.TestCase):
             self.assertEqual(400, error.exception.status_code)
 
     def test_stop_without_active_process_returns_conflict(self):
-        with mock.patch.object(self.main, "process", None):
+        with mock.patch.object(self.main, "active_runs", {}):
             response = asyncio.run(self.main.stop_run())
         self.assertEqual(409, response.status_code)
 
@@ -107,16 +107,13 @@ class BackendMainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             result_path = root / "result"
-            current_path = root / "current"
-            config_path = root / "config.properties"
-            with mock.patch.object(self.main, "config_path", str(config_path)), \
-                    mock.patch.object(self.main, "result_path", str(result_path)), \
-                    mock.patch.object(self.main, "current_path", str(current_path)), \
-                    mock.patch.object(self.main, "current_log_path", str(current_path / "output.log")), \
+            with mock.patch.object(self.main, "result_path", str(result_path)), \
+                    mock.patch.object(self.main, "workspace_path", str(root / "workspaces")), \
                     mock.patch.object(self.main, "bug_store", self.main.BugStore(str(result_path))), \
                     mock.patch.object(self.main, "run_store", self.main.RunStore(str(result_path))), \
                     mock.patch.object(self.main.subprocess, "Popen", side_effect=FileNotFoundError("java")):
-                self.main.execute_run("db.type=MYSQL\ndb.isolation=SER\nchecker.isolation=[]\nworkload.history=1\n")
+                run = self.main.new_run("db.type=MYSQL\ndb.isolation=SER\nchecker.isolation=[]\nworkload.history=1\n")
+                self.main.execute_run(run)
 
             metadata_files = list(result_path.glob("run_*/metadata.json"))
             self.assertEqual(1, len(metadata_files))
@@ -124,8 +121,7 @@ class BackendMainTest(unittest.TestCase):
             self.assertEqual("Failed", metadata["status"])
             self.assertIn("java", metadata["error"])
 
-        self.assertEqual("", self.main.current_run)
-        self.assertIsNone(self.main.process)
+        self.assertEqual({}, self.main.active_runs)
 
     def test_nonzero_java_exit_records_failed_run(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -133,24 +129,20 @@ class BackendMainTest(unittest.TestCase):
             result_path = root / "result"
             process = mock.Mock()
             process.wait.return_value = 7
-            with mock.patch.object(self.main, "config_path", str(root / "config.properties")), \
-                    mock.patch.object(self.main, "result_path", str(result_path)), \
-                    mock.patch.object(self.main, "current_path", str(root / "current")), \
-                    mock.patch.object(self.main, "current_log_path", str(root / "current" / "output.log")), \
+            with mock.patch.object(self.main, "result_path", str(result_path)), \
+                    mock.patch.object(self.main, "workspace_path", str(root / "workspaces")), \
                     mock.patch.object(self.main, "bug_store", self.main.BugStore(str(result_path))), \
                     mock.patch.object(self.main, "run_store", self.main.RunStore(str(result_path))), \
                     mock.patch.object(self.main.subprocess, "Popen", return_value=process):
-                self.main.execute_run("db.type=MYSQL\ndb.password=secret\n")
+                self.main.execute_run(self.main.new_run("db.type=MYSQL\ndb.password=secret\n"))
 
-            metadata_path = next((root / "result").glob("run_*/metadata.json"))
+            metadata_path = next(result_path.glob("run_*/metadata.json"))
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             self.assertEqual("Failed", metadata["status"])
             self.assertIn("code 7", metadata["error"])
             archived_config = (metadata_path.parent / "config.properties").read_text(encoding="utf-8")
             self.assertNotIn("db.password", archived_config)
             self.assertNotIn("secret", archived_config)
-            runtime_config = (root / "config.properties").read_text(encoding="utf-8")
-            self.assertIn("db.password=secret", runtime_config)
 
     def test_stop_request_records_stopped_run_and_resets_state(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -159,21 +151,22 @@ class BackendMainTest(unittest.TestCase):
             process = mock.Mock()
             process.poll.return_value = None
 
+            run_store = self.main.RunStore(str(result_path))
+
             def wait_after_stop():
                 response = asyncio.run(self.main.stop_run())
-                self.assertEqual({"message": "Stop requested"}, response)
+                self.assertEqual({"message": "Stop requested", "run_uid": run.run_uid}, response)
                 return -15
 
             process.wait.side_effect = wait_after_stop
-            run_store = self.main.RunStore(str(result_path))
-            with mock.patch.object(self.main, "config_path", str(root / "config.properties")), \
-                    mock.patch.object(self.main, "result_path", str(result_path)), \
-                    mock.patch.object(self.main, "current_path", str(root / "current")), \
-                    mock.patch.object(self.main, "current_log_path", str(root / "current" / "output.log")), \
+            with mock.patch.object(self.main, "result_path", str(result_path)), \
+                    mock.patch.object(self.main, "workspace_path", str(root / "workspaces")), \
                     mock.patch.object(self.main, "bug_store", self.main.BugStore(str(result_path))), \
                     mock.patch.object(self.main, "run_store", run_store), \
                     mock.patch.object(self.main.subprocess, "Popen", return_value=process):
-                self.main.execute_run("db.type=MYSQL\ndb.isolation=SER\nchecker.isolation=[]\nworkload.history=1\n")
+                run = self.main.new_run("db.type=MYSQL\ndb.isolation=SER\nchecker.isolation=[]\nworkload.history=1\n")
+                self.main.register_run(run)
+                self.main.execute_run(run)
 
             metadata_path = next(result_path.glob("run_*/metadata.json"))
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -181,9 +174,72 @@ class BackendMainTest(unittest.TestCase):
             self.assertIn("code -15", metadata["error"])
             self.assertEqual("Stopped", run_store.get(1).status)
             process.terminate.assert_called_once_with()
+            self.assertEqual({}, self.main.active_runs)
 
-        self.assertEqual("", self.main.current_run)
-        self.assertIsNone(self.main.process)
+    def test_runs_get_isolated_working_and_result_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result_path = root / "result"
+            working_directories = []
+            configs = []
+
+            def fake_popen(command, cwd=None, **kwargs):
+                working_directories.append(cwd)
+                configs.append(Path(command[-1]).read_text(encoding="utf-8"))
+                process = mock.Mock()
+                process.wait.return_value = 0
+                return process
+
+            with mock.patch.object(self.main, "result_path", str(result_path)), \
+                    mock.patch.object(self.main, "workspace_path", str(root / "workspaces")), \
+                    mock.patch.object(self.main, "bug_store", self.main.BugStore(str(result_path))), \
+                    mock.patch.object(self.main, "run_store", self.main.RunStore(str(result_path))), \
+                    mock.patch.object(self.main.subprocess, "Popen", side_effect=fake_popen):
+                first = self.main.new_run("db.type=MYSQL\nworkload.history=2\n")
+                second = self.main.new_run("db.type=MYSQL\nworkload.history=3\n")
+                self.main.execute_run(first)
+                self.main.execute_run(second)
+
+            self.assertNotEqual(working_directories[0], working_directories[1])
+            self.assertIn("output.run_id=" + first.run_uid, configs[0])
+            self.assertIn("output.run_id=" + second.run_uid, configs[1])
+            self.assertEqual(str(result_path / first.run_uid), first.result_dir)
+            self.assertNotIn(str(root), configs[0].split("output.path=")[1].splitlines()[0])
+
+    def test_run_list_reports_active_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = self.main.new_run("db.type=MYSQL\nworkload.history=1\n")
+            record.work_dir = tmp
+            record.status = "Running"
+            (Path(tmp) / "current").mkdir()
+            (Path(tmp) / "current" / "output.log").write_text("3 of 10", encoding="utf-8")
+            self.main.register_run(record)
+            try:
+                listing = asyncio.run(self.main.get_run_list())
+                self.assertEqual(1, len(listing))
+                self.assertEqual(record.run_uid, listing[0].run_uid)
+                self.assertEqual(20, listing[0].percentage)
+            finally:
+                self.main.active_runs.clear()
+
+    def test_live_endpoints_follow_the_requested_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = self.main.new_run("db.type=MYSQL\nworkload.history=1\n")
+            second = self.main.new_run("db.type=MYSQL\nworkload.history=2\n")
+            for record, message in ((first, "first log"), (second, "second log")):
+                record.work_dir = str(root / record.run_uid)
+                record.status = "Running"
+                (root / record.run_uid / "current").mkdir(parents=True)
+                (root / record.run_uid / "current" / "output.log").write_text(message, encoding="utf-8")
+                self.main.register_run(record)
+            try:
+                self.assertEqual("first log", self.main.current_log(first.run_uid))
+                self.assertEqual("second log", self.main.current_log(second.run_uid))
+                self.assertEqual("second log", self.main.current_log())
+            finally:
+                self.main.active_runs.clear()
+
 
     def test_config_archiving_sanitizes_embedded_url_credentials(self):
         config = ("db.type=MYSQL\n"

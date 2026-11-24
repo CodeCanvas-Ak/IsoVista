@@ -1,0 +1,17 @@
+schema_version: 1
+id: elle-internal-read-reject
+kind: regression
+model: kv-list
+history: history.edn
+source:
+  type: handcrafted
+  reference: benchmarks/regression/elle-internal-read-reject/history.edn
+  description: A single transaction appends to a key and then reads the key without its own append
+anomalies: [internal-consistency-violation]
+assumptions: [list-append, read-own-writes]
+checks:
+  - checker: ELLE_TCC
+    isolation: ELLE_TRANSACTIONAL_CAUSAL_CONSISTENCY
+    verdict: reject
+    requires: [elle-cli]
+notes: elle-cli evaluates list-append histories with the causal-cerone model, which implies internal consistency.

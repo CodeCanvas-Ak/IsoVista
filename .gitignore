@@ -6,9 +6,13 @@ target/
 dependency-reduced-pom.xml
 /DBTest-*-shaded.jar
 
-# Runtime artifacts
-current/
-result/
+# Runtime artifacts (anchored: a source package may legitimately be named "result")
+/current/
+/result/
+/workspaces/
+/elle_tmp/
+/viper_tmp/
+perf.json
 *.log
 /download.zip
 

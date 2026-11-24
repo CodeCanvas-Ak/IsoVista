@@ -1,5 +1,7 @@
 import checker.Checker;
 import checker.IsolationLevel;
+import checker.result.CheckerResult;
+import checker.result.CheckerRunner;
 import collector.Collector;
 import config.Config;
 import exceptions.NotImplementedException;
@@ -49,6 +51,7 @@ public class Main implements Callable<Integer> {
 
     @SneakyThrows
     public void run(Properties config) {
+        var startedAt = java.time.Instant.now();
         var collectorReflections = new Reflections("collector");
         Set<Class<? extends Collector>> collectorSubClasses = collectorReflections.getSubTypesOf(Collector.class);
         Map<String, Class<? extends Collector>> collectors = new HashMap<>();
@@ -109,8 +112,10 @@ public class Main implements Callable<Integer> {
             config.setProperty(Config.WORKLOAD_VARIABLE, "");
         }
         var isolationLevel = config.getProperty(Config.CHECKER_ISOLATION);
+        var checkerTimeoutMs = Long.parseLong(config.getProperty(Config.CHECKER_TIMEOUT_MS, "0"));
         int nBatch = 1;
         AtomicInteger bugCount = new AtomicInteger();
+        List<CheckerResult> checkerResults = new ArrayList<>();
         if (enableProfile) {
             profiler.startTick("run_total_time");
         }
@@ -141,6 +146,10 @@ public class Main implements Callable<Integer> {
                     history = loadHistory(config);
                 }
 
+                var historyType = config.getProperty(Config.HISTORY_TYPE, Config.DEFAULT_HISTORY_TYPE).toLowerCase(Locale.ROOT);
+                var historySha256 = HistoryFingerprint.ofHistory(history, historyType);
+                log.info("History sha256: {}", historySha256);
+
                 // verify history
                 for (var checkerAndIsolation : checkerIsoList) {
                     var checker = checkerAndIsolation.getLeft();
@@ -152,21 +161,28 @@ public class Main implements Callable<Integer> {
                         profiler.startTick(tag);
                     }
                     RuntimeStageRecorder.updateStage(ConfigParser.getCheckerIsolationAbbreviation(checkerAndIsolation.getRight()) + " Verification");
-                    boolean result;
+                    Checker checkerInstance;
                     try {
-                        var checkerInstance = checker.getDeclaredConstructor(Properties.class).newInstance(config);
-                        result = checkerInstance.verify(history);
-                        if (enableProfile) {
-                            profiler.endTick(tag);
-                            if (checkerInstance.getProfileInfo() != null) {
-                                profileInfo.put(tag, checkerInstance.getProfileInfo());
-                            }
-                            profiler.resetMaxMemory();
-                            System.gc();
+                        checkerInstance = checker.getDeclaredConstructor(Properties.class).newInstance(config);
+                    } catch (InstantiationException | IllegalAccessException | InvocationTargetException |
+                             NoSuchMethodException e) {
+                        throw new RuntimeException(e);
+                    }
+                    CheckerResult result = CheckerRunner.run(checkerInstance, isolation,
+                            checkerAndIsolation.getRight(), history, historyType, historySha256, checkerTimeoutMs);
+                    checkerResults.add(result);
+                    if (enableProfile) {
+                        profiler.endTick(tag);
+                        if (!result.getStagesMs().isEmpty()) {
+                            profileInfo.put(tag, result.getStagesMs());
                         }
-                        if (!result) {
+                        profiler.resetMaxMemory();
+                        System.gc();
+                    }
+                    switch (result.getStatus()) {
+                        case REJECT:
                             log.info("FIND BUG!");
-                            // serialize history and output dotfile
+                            // serialize history and output the counterexample
                             var bugDir = Paths.get(Config.DEFAULT_CURRENT_PATH, String.format("bug_%d", bugCount.getAndIncrement()));
                             try {
                                 Files.createDirectories(bugDir);
@@ -174,17 +190,17 @@ public class Main implements Callable<Integer> {
                                 throw new RuntimeException("Failed to create bug directory " + bugDir, e);
                             }
                             outputBugHistory(history, config, bugDir);
-                            try {
-                                checkerInstance.outputDotFile(Paths.get(bugDir.toString(), "conflict.dot").toString());
-                            } catch (NotImplementedException e) {
-                                log.warn("Checker {} does not provide DOT output; the bug history is still archived", checker.getName());
-                            }
-                        } else {
+                            var counterexample = CheckerRunner.archiveCounterexample(result, checkerInstance, bugDir);
+                            writeBugMetadata(bugDir, result, counterexample, historySha256);
+                            break;
+                        case ACCEPT:
                             log.info("NO BUG");
-                        }
-                    } catch (InstantiationException | IllegalAccessException | InvocationTargetException |
-                             NoSuchMethodException e) {
-                        throw new RuntimeException(e);
+                            break;
+                        case SKIPPED:
+                            log.warn("SKIP checker {}: {}", tag, result.getSkippedReason());
+                            break;
+                        default:
+                            log.warn("Checker {} ended with status {}: {}", tag, result.getStatus(), result.getError());
                     }
                 }
             }
@@ -247,7 +263,48 @@ public class Main implements Callable<Integer> {
         // output to the specific dir
         var outputPath = config.getProperty(Config.OUTPUT_PATH, Config.DEFAULT_OUTPUT_PATH);
         config.setProperty(Config.CHECKER_ISOLATION, isolationLevel);
-        RuntimeDataSerializer.getInstance(outputPath).outputToPath(historyNum * nBatch, bugCount.get(), config, enableProfile);
+
+        RunRecord runRecord = new RunRecord();
+        runRecord.setStartedAt(startedAt.toString());
+        runRecord.setEndedAt(java.time.Instant.now().toString());
+        runRecord.setCodeRevision(BuildInfo.revision());
+        runRecord.setCodeVersion(BuildInfo.version());
+        runRecord.setConfigSha256(HistoryFingerprint.ofProperties(config));
+        runRecord.setHistoryType(config.getProperty(Config.HISTORY_TYPE, Config.DEFAULT_HISTORY_TYPE));
+        runRecord.setHistoryPath(config.getProperty(Config.HISTORY_PATH));
+        runRecord.setHistorySha256(checkerResults.isEmpty() ? null : checkerResults.get(0).getHistorySha256());
+        runRecord.setHistoryHashes(checkerResults.stream().map(CheckerResult::getHistorySha256)
+                .distinct().collect(Collectors.toList()));
+        var historyPath = config.getProperty(Config.HISTORY_PATH);
+        if (historyPath != null && skipGeneration) {
+            try {
+                runRecord.setHistorySourceSha256(HistoryFingerprint.sha256(Paths.get(historyPath)));
+            } catch (RuntimeException e) {
+                log.warn("Cannot hash the history source {}: {}", historyPath, e.getMessage());
+            }
+        }
+        runRecord.setEnvironment(RunRecord.environment());
+        runRecord.setCheckerResults(checkerResults);
+        runRecord.setStatus("completed");
+        RuntimeDataSerializer.getInstance(outputPath, config.getProperty(Config.OUTPUT_RUN_ID))
+                .outputToPath(historyNum * nBatch, bugCount.get(), config, enableProfile,
+                        Paths.get(Config.DEFAULT_CURRENT_PATH), checkerResults, runRecord);
+    }
+
+    @SneakyThrows
+    static void writeBugMetadata(Path bugDir, CheckerResult result, String counterexample, String historySha256) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("checker", result.getChecker());
+        metadata.put("isolation", result.getIsolation());
+        metadata.put("status", result.getStatus().value());
+        metadata.put("counterexample", counterexample);
+        metadata.put("counterexample_format", result.getCounterexampleFormat());
+        metadata.put("history_sha256", historySha256);
+        if (result.getCounterexampleNote() != null) {
+            metadata.put("counterexample_note", result.getCounterexampleNote());
+        }
+        Files.writeString(bugDir.resolve("bug.json"), new com.fasterxml.jackson.databind.ObjectMapper()
+                .writerWithDefaultPrettyPrinter().writeValueAsString(metadata));
     }
 
     static History loadHistory(Properties config) {

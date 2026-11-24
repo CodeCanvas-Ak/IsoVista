@@ -105,6 +105,21 @@ public class RuntimeInfoRecorder {
         lock.unlock();
     }
 
+    /**
+     * Stops the external processes registered by checkers. Used when a verification is
+     * abandoned because of a timeout, so a timed out external checker cannot keep running.
+     */
+    public static void destroyRegisteredProcesses() {
+        lock.lock();
+        try {
+            for (var pid : new ArrayList<>(pidList)) {
+                ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
 
     static void updateCPU() {
         OperatingSystemMXBean osBean = ManagementFactory.getPlatformMXBean(OperatingSystemMXBean.class);

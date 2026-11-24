@@ -1,0 +1,17 @@
+schema_version: 1
+id: elle-list-append-accept
+kind: regression
+model: kv-list
+history: history.edn
+source:
+  type: handcrafted
+  reference: third_party/Viper/resources/elle-cli-0.1.3/histories/elle/list-append-gh-30.edn
+  description: Legal list-append history shipped with the elle-cli examples
+anomalies: []
+assumptions: [list-append]
+checks:
+  - checker: ELLE_TCC
+    isolation: ELLE_TRANSACTIONAL_CAUSAL_CONSISTENCY
+    verdict: accept
+    requires: [elle-cli]
+notes: Positive counterpart of elle-internal-read-reject.

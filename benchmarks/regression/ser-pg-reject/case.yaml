@@ -1,0 +1,17 @@
+schema_version: 1
+id: ser-pg-reject
+kind: regression
+model: kv-rw
+history: history.txt
+source:
+  type: collected
+  reference: examples/histories/pg_ser_bug.txt
+  description: PostgreSQL serializable anomaly collected by the IsoVista authors
+anomalies: [serializability-violation]
+assumptions: [complete-wr, unique-write-value]
+checks:
+  - checker: SMT_SER
+    isolation: SERIALIZABLE
+    verdict: reject
+    requires: [native-monosat]
+notes: SER counterexample; the SMT checker is the only registered SER implementation.

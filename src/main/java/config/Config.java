@@ -3,6 +3,7 @@ package config;
 public class Config {
     // output configs
     public static final String OUTPUT_PATH = "output.path";
+    public static final String OUTPUT_RUN_ID = "output.run_id";
 
     // database configs
     public static final String DB_URL = "db.url";
@@ -29,6 +30,10 @@ public class Config {
 
     // checker configs
     public static final String CHECKER_ISOLATION = "checker.isolation";
+    // 0 means no timeout; a timed out verification is recorded as timeout, never as a verdict
+    public static final String CHECKER_TIMEOUT_MS = "checker.timeout_ms";
+    // optional: archive the SCC plot of a rejected list-append history; needs graphviz
+    public static final String ELLE_PLOT = "checker.elle_plot";
 
     // profiler configs
     public static final String PROFILER_ENABLE = "profiler.enable";

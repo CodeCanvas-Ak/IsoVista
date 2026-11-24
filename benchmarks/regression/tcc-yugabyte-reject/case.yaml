@@ -1,0 +1,16 @@
+schema_version: 1
+id: tcc-yugabyte-reject
+kind: regression
+model: kv-rw
+history: history.txt
+source:
+  type: collected
+  reference: examples/histories/yugabyte_tcc.txt
+  description: Yugabyte transactional causal consistency anomaly
+anomalies: [causal-consistency-violation]
+assumptions: [complete-wr, unique-write-value]
+checks:
+  - checker: C4
+    isolation: TRANSACTIONAL_CAUSAL_CONSISTENCY
+    verdict: reject
+notes: Text RW-register history; it is not interchangeable with the Elle list-append cases.

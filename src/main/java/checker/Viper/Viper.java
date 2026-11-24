@@ -146,9 +146,18 @@ public class Viper<VarType, ValType> implements Checker<VarType, ValType> {
     }
 
     @Override
-    @SneakyThrows
+    public boolean supportsHistoryType(String historyType) {
+        return !"elle".equalsIgnoreCase(historyType);
+    }
+
+    @Override
+    public String counterexampleFormat() {
+        return "none";
+    }
+
+    @Override
     public void outputDotFile(String path) {
-        log.warn("Not implemented outputDotFile in Viper");
+        throw new NotImplementedException();
     }
 
     @Override

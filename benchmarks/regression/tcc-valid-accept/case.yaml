@@ -1,0 +1,16 @@
+schema_version: 1
+id: tcc-valid-accept
+kind: regression
+model: kv-rw
+history: history.txt
+source:
+  type: handcrafted
+  reference: benchmarks/regression/tcc-valid-accept/history.txt
+  description: Serial-order friendly history shared with the SI accept case
+anomalies: []
+assumptions: [complete-wr, unique-write-value]
+checks:
+  - checker: C4
+    isolation: TRANSACTIONAL_CAUSAL_CONSISTENCY
+    verdict: accept
+notes: Positive counterpart of tcc-yugabyte-reject.
